@@ -1,0 +1,41 @@
+1️⃣ Packaging .exe (priorité absolue)
+Crée le packaging PyInstaller pour Amah Agent.
+
+Génère :
+1. Un fichier amah.spec optimisé pour inclure tous les assets
+2. Un script build.bat qui lance la compilation en une commande
+3. Un fichier version_info.txt pour les métadonnées Windows (.exe) [optionnel]
+
+Contraintes :
+- Un seul .exe standalone (--onefile)
+- Inclure le dossier tools/ et config.py
+- NE PAS inclure .env dans le .exe (clé API exposée — dangereuse)
+- NE PAS inclure amah_memory.db (elle se crée automatiquement au premier lancement)
+- L'icône Amah doit apparaître sur le .exe
+- Le .exe lance gui.py par défaut (pas agent.py)
+- Tester que les imports groq, rich, tkinter, sqlite3 sont bien bundlés
+
+2️⃣ Email Gmail
+Ajoute un outil email Gmail à Amah Agent.
+
+Nouveau fichier tools/email.py avec 3 outils :
+- read_emails(n) — lire les N derniers emails (expéditeur, sujet, extrait)
+- send_email(to, subject, body) — envoyer un email
+- search_emails(query) — chercher dans la boîte Gmail
+
+Auth : OAuth2 Google (credentials.json + token.json, jamais dans le code)
+Intègre dans config.py sans casser les 19 outils existants.
+Ajoute les dépendances nécessaires dans requirements.txt.
+
+3️⃣ Navigation web Playwright
+Ajoute la navigation web automatique avec Playwright.
+
+Nouveau fichier tools/browser.py avec 5 outils :
+- open_browser(url) — ouvrir une page
+- click_element(selector) — cliquer sur un élément
+- fill_form(selector, value) — remplir un champ
+- take_screenshot(path) — capturer l'écran du navigateur
+- get_page_text() — lire le contenu texte de la page ouverte (essentiel : sans ça l'agent ne voit pas ce qu'il affiche)
+
+Utilise Playwright en mode headless=False (l'utilisateur voit le navigateur)
+Intègre dans config.py sans casser les outils existants.

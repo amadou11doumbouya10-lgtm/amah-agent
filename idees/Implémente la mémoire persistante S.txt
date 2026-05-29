@@ -1,0 +1,15 @@
+Implémente la mémoire persistante SQLite pour Amah Agent en deux niveaux :
+
+Niveau 1 — Historique court terme :
+- Table conversations(id, session_id, role, content, timestamp)
+- Charger les N derniers messages au démarrage
+- Sauvegarder chaque échange automatiquement
+
+Niveau 2 — Mémoire long terme :
+- Table memory(id, key, value, last_updated)
+- 2 nouveaux outils : save_memory(key, value) et get_memory(key)
+- L'agent peut mémoriser des infos sur l'utilisateur entre les sessions
+
+Fichier SQLite : amah_memory.db dans la racine du projet
+Nouveau fichier : tools/memory.py
+Intègre tout dans agent.py et config.py sans casser les outils existants.

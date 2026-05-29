@@ -1,0 +1,17 @@
+groq
+python-dotenv
+rich
+ddgs
+python-docx
+fpdf2
+pypdf
+psutil
+playwright
+pillow
+openpyxl
+pyttsx3
+pillow
+deep-translator
+qrcode[pil]
+SpeechRecognition
+pyaudio

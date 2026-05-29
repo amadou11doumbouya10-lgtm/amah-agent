@@ -1,0 +1,34 @@
+# Credentials — NE JAMAIS publier
+.env
+token.json
+credentials.json
+
+# Base de données locale
+amah_memory.db
+
+# Build PyInstaller
+dist/
+build/
+*.spec.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Images temporaires de génération d'icône
+amah_icon_*.png
+amah_clean_*.png
+amah_final_*.png
+amah_icon_preview.png
+_update.ps1
+
+# Dossier développeur (confidentiel)
+developpeur/
+
+# IDE
+.vscode/
+.idea/
+*.swp

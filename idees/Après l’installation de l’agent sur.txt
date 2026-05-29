@@ -1,0 +1,1 @@
+Après l’installation de l’agent sur la machine l’icône de l’avart doit apparaître sur le bureau du pc et t si tu cliques là dessus tu a directement accès à l’interface de l’agent.
