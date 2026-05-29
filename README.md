@@ -11,10 +11,11 @@
   <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D4?logo=windows" />
   <img src="https://img.shields.io/badge/Interface-tkinter-green" />
   <img src="https://img.shields.io/badge/Licence-Propriétaire-red" />
+  <img src="https://img.shields.io/badge/Contact-contact.amah.officiel%40gmail.com-C8A96E?logo=gmail&logoColor=white" />
 </p>
 
 <p align="center">
-  📧 <a href="mailto:contact.amah.officiel@gmail.com"><strong>contact.amah.officiel@gmail.com</strong></a>
+  <b>📧 &nbsp;<a href="mailto:contact.amah.officiel@gmail.com">contact.amah.officiel@gmail.com</a></b>
 </p>
 
 ---
@@ -182,10 +183,17 @@ Toute utilisation commerciale nécessite une autorisation écrite.
 
 ## Contact
 
-📧 contact.amah.officiel@gmail.com
+<p align="center">
+  <a href="mailto:contact.amah.officiel@gmail.com">
+    <img src="https://img.shields.io/badge/📧 contact.amah.officiel@gmail.com-Envoyer un email-C8A96E?style=for-the-badge&logo=gmail&logoColor=white" />
+  </a>
+</p>
+
+> Pour toute question, démonstration ou demande commerciale : **contact.amah.officiel@gmail.com**
 
 ---
 
 <p align="center">
-  <i>Construit avec Python 3.13 · Groq API · Windows 11</i>
+  <i>Construit avec Python 3.13 · Groq API · Windows 11</i><br/>
+  <b>📧 contact.amah.officiel@gmail.com</b>
 </p>
