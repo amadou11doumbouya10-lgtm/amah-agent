@@ -13,6 +13,10 @@
   <img src="https://img.shields.io/badge/Licence-Propriétaire-red" />
 </p>
 
+<p align="center">
+  📧 <a href="mailto:contact.amah.officiel@gmail.com"><strong>contact.amah.officiel@gmail.com</strong></a>
+</p>
+
 ---
 
 ## Présentation
