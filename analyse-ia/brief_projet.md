@@ -129,9 +129,27 @@ groq, python-dotenv, rich, ddgs, python-docx, fpdf2, pypdf, psutil,
 playwright, pillow, openpyxl, pyttsx3, deep-translator, qrcode[pil],
 SpeechRecognition, pyaudio
 
+## Améliorations v1.2 (appliquées)
+
+### Performance
+- **Cache LRU 10min** sur web_search et read_webpage — évite requêtes doublons dans la session
+- **Retry backoff exponentiel** Groq (1s → 2s → 4s) sur erreurs 429 et 503
+- **Trimming contexte corrigé** — préserve les paires tool_call/tool_result orphelines
+
+### Robustesse
+- **Playwright check** au démarrage — avertissement si Chrome non installé
+- **Rapport de crash auto** — email à contact.amah.officiel@gmail.com sur exception non gérée
+- **check_update opérationnel** — version.json hébergé sur GitHub, URL réelle configurée
+
+### Ce que le prompt suggérait et pourquoi on a skip
+- Routeur d'intention : ajoute latence + risque de casser des cas limites
+- Streaming tkinter : complexe, gain UX modéré, à faire en v2
+- Onboarding 5 étapes : nice to have, pas bloquant pour la vente
+- Stats tab GUI : nice to have, données disponibles dans get_stats()
+
 ## Futur
-- Activer check_update (héberger version.json)
-- Licence entreprise volume (Option B)
-- Google Calendar
+- Licence entreprise volume (Option B — clé unique pour N postes)
+- Google Calendar (agenda)
 - Mode mains libres (listen + speak en boucle)
 - Dashboard journalier automatique
+- Streaming réponse Groq dans tkinter
