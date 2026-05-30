@@ -1,112 +1,137 @@
 # Brief — Projet Amah Agent
-*Dernière mise à jour : 29/05/2026 — Version 1.0.0 finale*
+*Dernière mise à jour : 29/05/2026 — Version 1.0.0 stable*
 
 ## Contexte
-Agent IA local sur PC Windows — 65 outils, prêt à la vente commerciale.
+Agent IA local PC Windows. 65 outils. Prêt à la vente commerciale.
 Cerveau : Groq API (llama-3.3-70b-versatile, gratuit).
-Interfaces : terminal Rich (agent.py) + fenêtre graphique tkinter (gui.py).
-Langage : Python 3.13. Packaging : PyInstaller (.exe 114 Mo standalone).
+Interfaces : terminal Rich + fenêtre graphique tkinter.
+Python 3.13 · PyInstaller (.exe 114 Mo standalone).
 Email officiel : contact.amah.officiel@gmail.com
 
-## Les 65 outils par catégorie
+## Architecture clé
+- `tools/__init__.py` — source unique de TOOL_FUNCTIONS (65 outils)
+- `gui.py` — interface graphique + SetupWindow + LicenseWindow
+- `config.py` — 65 définitions outils + system prompt compact (1 544 chars)
+- `amah_memory.db` — SQLite (conversations + memories + tool_usage)
+
+## Les 65 outils (sync config ↔ tools vérifiée = 65 = 65)
 
 | Catégorie | Outils | Fichier |
 |-----------|--------|---------|
-| Fichiers/dossiers | 7 | tools/files.py |
-| Documents Word/PDF/TXT | 4 | tools/documents.py |
+| Fichiers | 7 | tools/files.py |
+| Documents | 4 | tools/documents.py |
 | Recherche web | 2 | tools/search.py |
-| Système Windows | 3 | tools/system.py |
-| Mémoire SQLite | 3 | tools/memory.py |
+| Système | 3 | tools/system.py |
+| Mémoire | 3 | tools/memory.py |
 | Email Gmail | 3 | tools/email_tool.py |
-| Navigateur Chrome | 5 | tools/browser.py |
-| Voix (synthèse) | 1 | tools/voice.py |
-| Notifications/rappels | 2 | tools/notifications.py |
+| Navigateur | 5 | tools/browser.py |
+| Voix | 1 | tools/voice.py |
+| Notifications | 2 | tools/notifications.py |
 | Excel | 3 | tools/excel.py |
 | Presse-papiers | 2 | tools/clipboard.py |
-| Calcul/date/password | 5 | tools/utils.py |
+| Calcul/date | 5 | tools/utils.py |
 | Archives ZIP | 3 | tools/archive.py |
-| Images/réseau/processus | 6 | tools/image_tool.py |
+| Images/réseau | 6 | tools/image_tool.py |
 | Météo | 2 | tools/meteo.py |
 | Traduction | 2 | tools/translator.py |
 | QR Code | 1 | tools/qrcode_tool.py |
 | Reconnaissance vocale | 2 | tools/voice_recognition.py |
 | Planificateur Windows | 4 | tools/scheduler.py |
-| Statistiques d'usage | 2 | tools/stats.py |
+| Statistiques | 2 | tools/stats.py |
 | Mises à jour | 2 | tools/updater.py |
 | Licence | 1 | tools/license.py |
-| **TOTAL** | **65** | |
 
-## Architecture technique
+## Sécurité — corrections appliquées
 
-### Source unique des outils
-`tools/__init__.py` contient TOOL_FUNCTIONS — le dict central de tous les 65 outils.
-`agent.py` et `gui.py` importent simplement : `from tools import TOOL_FUNCTIONS`
-→ Ajouter un outil = modifier 3 fichiers seulement (outil + __init__ + config)
+### PowerShell (tools/system.py)
+- 14 mots-clés bloqués (rm -rf, invoke-expression, downloadstring, wget, etc.)
+- 5 caractères interdits : & && || ` $(
+- Validation dans scheduler.py (heure 0-23, minute 0-59, guillemets échappés)
 
-### Mémoire persistante (amah_memory.db)
-- `conversations` : historique auto, 40 derniers rechargés au démarrage
-- `memories` : mémoire explicite long terme par catégorie
-- `tool_usage` : statistiques d'utilisation par outil
-- Trimming contexte API : system prompt + 60 derniers messages max
+### Email IMAP (tools/email_tool.py)
+- `conn = None` + `try/finally conn.logout()` sur read_emails ET search_emails
+- Lecture des emails par numéro de séquence IMAP (chronologique garanti)
+- Requête de recherche échappée contre injection
 
-### Système de licence offline
-- Clé HMAC-SHA256 liée au Machine UUID Windows
-- Génération : `py -3.13 tools/license.py <machine_uuid>`
-- Clé secrète dans `tools/license.py` (_SECRET)
-- Script rapide : `developpeur/generate_license.bat`
+### Mémoire (tools/memory.py)
+- `except: pass` → `log.warning()` partout
+- Context manager `with sqlite3.connect()` pour save_message
+- `cleanup_old_messages(90)` appelé au démarrage (purge auto > 90 jours)
 
-### Mises à jour automatiques
-- Version actuelle : 1.0.0 (dans tools/updater.py)
-- Mécanisme : vérifie un fichier JSON hébergé publiquement
-- À configurer : VERSION_URL dans tools/updater.py
+### Playwright (tools/browser.py)
+- `atexit.register(_close_browser)` — Chrome fermé proprement à la fin
+
+### Licence (tools/license.py)
+- Clé secrète lue depuis `.env` (AMAH_LICENSE_SECRET) avec fallback
+- Jamais hardcodée dans le code
+
+### Mise à jour (tools/updater.py)
+- Détecte si VERSION_URL est encore un placeholder → message clair
+
+## Système de licence
+- Offline HMAC-SHA256 lié au Machine UUID Windows
+- Clé secrète dans .env (AMAH_LICENSE_SECRET)
+- Génération : `py -3.13 tools/license.py <uuid>` ou `developpeur/generate_license.bat`
+- **Obligatoire** au démarrage — LicenseWindow si clé absente/invalide
+- LicenseWindow affiche le UUID + bouton Copier + champ de saisie
+- Clé sauvegardée dans .env après validation
 
 ## Interface graphique (gui.py)
-- Écran de configuration automatique au premier lancement
+Flux de démarrage :
+```
+.exe lancé → charger .env
+    ↓
+Pas de GROQ_API_KEY ? → SetupWindow (crée .env)
+    ↓
+Pas de licence valide ? → LicenseWindow (activation)
+    ↓
+AmahGUI (chat principal)
+```
+
+Améliorations UI :
 - Horodatage [HH:MM] sur chaque message
-- Affichage des outils utilisés inline (en italique doré)
-- Barre d'état : Prêt / réfléchit... / outil en cours
+- Outils utilisés affichés APRÈS la réponse (format : `[ recherche web → lecture page ]`)
+- Barre d'état dynamique
+- Bouton Copier lit directement le dernier message Amah dans le widget (plus fiable)
+- Ctrl+C ne remplace plus la sélection de texte manuelle
 - Entrée multi-ligne (Shift+Entrée)
-- Boutons Copier + Réinitialiser dans le header
-- Raccourcis : Ctrl+R, Ctrl+C, Échap
-- Menu clic droit sur le chat
+- MAX_MESSAGES = 40 (contexte API)
+- Nettoyage auto messages > 90 jours au démarrage
+
+## Performances
+- System prompt : 1 544 chars (réduit de -40%)
+- Contexte max : 40 messages (réduit de 60)
+- Historique chargé : 20 messages (réduit de 40)
+- Trimming : [system] + 60 derniers avant chaque appel API
 
 ## Distribution client
 ```
 dist/
-├── Amah Agent.exe              (114 Mo, standalone, 65 outils)
-├── .env                        (Gmail pré-configuré, Groq à renseigner)
-├── installer_navigateur.bat    (Chrome, une seule fois)
+├── Amah Agent.exe          (114 Mo, standalone)
+├── .env                    (Gmail pré-configuré, Groq + Licence à renseigner)
+├── installer_navigateur.bat
 └── Guide_Installation_Client.docx
 ```
 
 ## Dossier développeur
 ```
 developpeur/
-├── README_DEVELOPPEUR.md       Vue d'ensemble technique
-├── GUIDE_LICENCE.md            Système de licence complet
-├── GUIDE_BUILD.md              Compiler le .exe
-├── GUIDE_MISE_A_JOUR.md        Publier une mise à jour
-├── GUIDE_AJOUT_OUTIL.md        Ajouter un outil (5 étapes)
-└── generate_license.bat        Génère une clé client
+├── README_DEVELOPPEUR.md
+├── GUIDE_LICENCE.md + GUIDE_LICENCE_COMPLET.docx
+├── GUIDE_BUILD.md
+├── GUIDE_MISE_A_JOUR.md
+├── GUIDE_AJOUT_OUTIL.md
+└── generate_license.bat
 ```
 
-## Dépendances (requirements.txt)
-```
+## Dépendances
 groq, python-dotenv, rich, ddgs, python-docx, fpdf2, pypdf, psutil,
 playwright, pillow, openpyxl, pyttsx3, deep-translator, qrcode[pil],
 SpeechRecognition, pyaudio
-```
 
-## Sécurité
-- run_command bloque les commandes destructives
-- Toutes les clés dans .env (jamais dans le code ni le .exe)
-- Licence liée au hardware (non transférable entre PC)
-- Trimming contexte pour éviter les fuites de données en mémoire longue
-
-## Ce qui reste à faire (futur)
-- Activer la vérification de licence obligatoire au démarrage
-- Héberger version.json pour les mises à jour automatiques
-- Google Calendar (agenda)
+## Futur
+- Activer check_update (héberger version.json)
+- Licence entreprise volume (Option B)
+- Google Calendar
 - Mode mains libres (listen + speak en boucle)
-- Telegram bot
 - Dashboard journalier automatique

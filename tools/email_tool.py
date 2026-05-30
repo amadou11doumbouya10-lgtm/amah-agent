@@ -53,20 +53,28 @@ def _extract_body(msg) -> str:
 
 
 def read_emails(n: int = 5) -> dict:
+    conn = None
     try:
         address, password = _creds()
         conn = imaplib.IMAP4_SSL(IMAP_HOST)
         conn.login(address, password)
-        conn.select('INBOX')
+        _, data = conn.select('INBOX')
+        total = int(data[0])  # nombre total de messages
 
-        _, data = conn.search(None, 'ALL')
-        ids = data[0].split()
-        to_fetch = ids[-n:][::-1]
+        if total == 0:
+            conn.logout()
+            return {'success': True, 'total': 0, 'emails': [], 'message': 'Boite vide'}
+
+        # Numéros de séquence IMAP — toujours chronologiques
+        start = max(1, total - n + 1)
+        sequence = list(range(total, start - 1, -1))  # du plus récent au plus ancien
 
         emails = []
-        for uid in to_fetch:
-            _, msg_data = conn.fetch(uid, '(RFC822)')
-            msg = email.message_from_bytes(msg_data[0][1])
+        for num in sequence:
+            _, msg_data = conn.fetch(str(num), '(RFC822)')
+            if not msg_data or not msg_data[0]:
+                continue
+            msg  = email.message_from_bytes(msg_data[0][1])
             body = _extract_body(msg)
             emails.append({
                 'de':      _decode(msg.get('From', '')),
@@ -75,10 +83,15 @@ def read_emails(n: int = 5) -> dict:
                 'extrait': body[:300].strip(),
             })
 
-        conn.logout()
         return {'success': True, 'total': len(emails), 'emails': emails}
     except Exception as e:
         return {'error': str(e)}
+    finally:
+        try:
+            if conn:
+                conn.logout()
+        except Exception:
+            pass
 
 
 def send_email(to: str, subject: str, body: str) -> dict:
@@ -101,14 +114,15 @@ def send_email(to: str, subject: str, body: str) -> dict:
 
 
 def search_emails(query: str) -> dict:
+    conn = None
     try:
         address, password = _creds()
         conn = imaplib.IMAP4_SSL(IMAP_HOST)
         conn.login(address, password)
         conn.select('INBOX')
 
-        # Gmail IMAP supporte X-GM-RAW pour les requêtes Gmail natives
-        _, data = conn.search(None, f'X-GM-RAW "{query}"')
+        safe_query = query.replace('"', '\\"')
+        _, data = conn.search(None, f'X-GM-RAW "{safe_query}"')
         ids = data[0].split()
         to_fetch = ids[-10:][::-1]
 
@@ -122,7 +136,12 @@ def search_emails(query: str) -> dict:
                 'date':  msg.get('Date', ''),
             })
 
-        conn.logout()
         return {'success': True, 'requete': query, 'total': len(emails), 'emails': emails}
     except Exception as e:
         return {'error': str(e)}
+    finally:
+        try:
+            if conn:
+                conn.logout()
+        except Exception:
+            pass

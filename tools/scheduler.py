@@ -26,9 +26,15 @@ def create_daily_task(name: str, command: str, hour: int = 8, minute: int = 0) -
     minute  : minute (0-59)
     """
     try:
+        if not (0 <= hour <= 23):
+            return {"error": "L'heure doit être entre 0 et 23"}
+        if not (0 <= minute <= 59):
+            return {"error": "La minute doit être entre 0 et 59"}
+        # Remplace les guillemets droits par des simples pour éviter l'injection PS
+        safe_cmd = command.replace('"', "'")
         time_str = f"{hour:02d}:{minute:02d}"
         ps = f"""
-$action  = New-ScheduledTaskAction -Execute 'powershell' -Argument '-NoProfile -WindowStyle Hidden -Command "{command}"'
+$action  = New-ScheduledTaskAction -Execute 'powershell' -Argument '-NoProfile -WindowStyle Hidden -Command "{safe_cmd}"'
 $trigger = New-ScheduledTaskTrigger -Daily -At '{time_str}'
 $settings = New-ScheduledTaskSettingsSet -RunOnlyIfNetworkAvailable:$false -StartWhenAvailable
 Register-ScheduledTask -TaskName 'Amah_{name}' -Action $action -Trigger $trigger -Settings $settings -Force

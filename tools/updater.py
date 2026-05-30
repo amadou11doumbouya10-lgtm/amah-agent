@@ -16,9 +16,16 @@ CURRENT_VERSION = "1.0.0"
 # {"version": "1.1.0", "url": "https://ton-site.com/dist/Amah Agent.exe", "notes": "Corrections de bugs"}
 VERSION_URL = "https://raw.githubusercontent.com/ton-compte/amah-agent/main/version.json"
 
+_URL_IS_PLACEHOLDER = "ton-compte" in VERSION_URL
+
 
 def check_update() -> dict:
     """Vérifie si une mise à jour est disponible."""
+    if _URL_IS_PLACEHOLDER:
+        return {
+            "success": False,
+            "message": "Mises à jour non configurées. Héberge un version.json et mets à jour VERSION_URL dans tools/updater.py.",
+        }
     try:
         req  = urllib.request.Request(VERSION_URL, headers={"User-Agent": "AmahAgent/1.0"})
         data = json.loads(urllib.request.urlopen(req, timeout=8).read())

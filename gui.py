@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS
-from tools.memory import save_message, load_recent_messages
+from tools.memory import save_message, load_recent_messages, cleanup_old_messages
 
 # ── Couleurs ────────────────────────────────────────────────────────────────
 BG_DARK    = "#1a1a17"
@@ -26,7 +26,7 @@ TEXT_TOOL  = "#9a7a45"
 RED        = "#c0392b"
 GREEN      = "#27ae60"
 
-MAX_MESSAGES = 60
+MAX_MESSAGES = 40
 
 TOOL_LABELS = {
     "list_files":      "lecture dossier",
@@ -79,11 +79,13 @@ class AmahGUI:
                 "GROQ_API_KEY introuvable dans le fichier .env")
             sys.exit(1)
 
-        self.client      = Groq(api_key=api_key)
-        self.session_id  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.busy        = False
-        self._last_reply = ""
+        self.client         = Groq(api_key=api_key)
+        self.session_id     = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.busy           = False
+        self._last_reply    = ""
+        self._tools_this_call = []   # outils utilisés dans l'appel en cours
 
+        cleanup_old_messages(days=90)          # nettoie les messages > 90 jours
         previous             = load_recent_messages(limit=20)
         self.messages        = [{"role": "system", "content": SYSTEM_PROMPT}] + previous
         self._previous_count = len(previous)
@@ -193,8 +195,7 @@ class AmahGUI:
     def _bind_shortcuts(self):
         self.root.bind("<Control-r>", lambda e: self._reset())
         self.root.bind("<Control-R>", lambda e: self._reset())
-        self.root.bind("<Control-c>", lambda e: self._copy_last())
-        self.root.bind("<Control-C>", lambda e: self._copy_last())
+        # Ctrl+C retiré du root — conflit avec la sélection de texte normale
         self.root.bind("<Escape>",    lambda e: self._clear_entry())
 
     # ── Saisie ──────────────────────────────────────────────────────────────
@@ -288,6 +289,7 @@ class AmahGUI:
                     ("reflechit...\n\n", "thinking"))
 
         self.busy = True
+        self._tools_this_call = []   # remet à zéro pour ce nouvel appel
         self.entry.config(state=tk.DISABLED)
         self.btn.config(state=tk.DISABLED)
         self._set_status("Amah reflechit...")
@@ -300,13 +302,37 @@ class AmahGUI:
             save_message(self.session_id, "assistant", reply)
             self.root.after(0, self._show_reply, reply)
         except Exception as e:
-            self.root.after(0, self._show_error, str(e))
+            self.root.after(0, self._show_error, self._format_error(str(e)))
+
+    def _format_error(self, error: str) -> str:
+        if "rate_limit_exceeded" in error or "Rate limit" in error:
+            import re
+            wait = re.search(r"try again in (.+?)\.", error)
+            temps = wait.group(1) if wait else "quelques minutes"
+            return (
+                f"Limite quotidienne Groq atteinte.\n"
+                f"Attends {temps} avant de continuer.\n"
+                f"Ou cree un 2eme compte gratuit sur console.groq.com"
+            )
+        if "invalid_api_key" in error or "API key" in error.lower():
+            return "Cle API Groq invalide. Verifie ta cle dans le fichier .env"
+        if "connection" in error.lower() or "network" in error.lower():
+            return "Pas de connexion internet. Verifie ta connexion et reessaie."
+        if "timeout" in error.lower():
+            return "La requete a pris trop de temps. Reessaie dans un moment."
+        return error
 
     def _show_reply(self, reply):
         self._last_reply = reply
+        # Supprime uniquement le "réfléchit..." — pas les outils déjà affichés
         self.chat.config(state=tk.NORMAL)
         self.chat.delete("thinking_start", tk.END)
         self.chat.config(state=tk.DISABLED)
+        # Affiche les outils utilisés pendant cet appel
+        if self._tools_this_call:
+            outils = " → ".join(self._tools_this_call)
+            self._write((f"  [ {outils} ]\n", "tool"))
+        self._tools_this_call = []
         self._write((f"[{self._ts()}] ", "timestamp"),
                     ("Amah > ", "amah_lbl"),
                     (reply + "\n\n", "amah_txt"))
@@ -337,9 +363,21 @@ class AmahGUI:
         self._set_status("Pret")
 
     def _copy_last(self):
-        if self._last_reply:
+        # Lit directement le dernier message Amah dans le chat (plus fiable)
+        content = self.chat.get("1.0", tk.END)
+        marker  = "Amah > "
+        last_idx = content.rfind(marker)
+        if last_idx != -1:
+            after   = content[last_idx + len(marker):]
+            sep_idx = after.find("-" * 30)
+            text    = after[:sep_idx].strip() if sep_idx != -1 else after.strip()
+        elif self._last_reply:
+            text = self._last_reply
+        else:
+            return
+        if text:
             self.root.clipboard_clear()
-            self.root.clipboard_append(self._last_reply)
+            self.root.clipboard_append(text)
             self._set_status("Derniere reponse copiee !")
             self.root.after(2000, lambda: self._set_status("Pret"))
 
@@ -384,7 +422,8 @@ class AmahGUI:
         if not func:
             return json.dumps({"error": f"Outil inconnu: {name}"}, ensure_ascii=False)
 
-        self.root.after(0, self._write_tool, name)
+        # Collecte le nom (affiché après la réponse, pas pendant — évite la suppression)
+        self._tools_this_call.append(TOOL_LABELS.get(name, name))
         label = TOOL_LABELS.get(name, name)
         self.root.after(0, self._set_status, f"Outil : {label}...")
 
@@ -524,6 +563,96 @@ class SetupWindow:
         self.on_complete()
 
 
+# ── Écran de licence obligatoire ────────────────────────────────────────────
+
+class LicenseWindow:
+    def __init__(self, root, on_complete, env_path):
+        self.root        = root
+        self.on_complete = on_complete
+        self.env_path    = env_path
+
+        from tools.license import get_machine_id
+        self.machine_id = get_machine_id()
+
+        self.root.title("Amah Agent — Activation requise")
+        self.root.configure(bg=BG_DARK)
+        self.root.geometry("640x440")
+        self.root.resizable(False, False)
+        self._build()
+
+    def _build(self):
+        # En-tête
+        hdr = tk.Frame(self.root, bg=BG_PANEL, pady=14)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="THE AMAH — ACTIVATION",
+                 bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
+        tk.Label(hdr, text="Une cle de licence est requise pour utiliser Amah Agent",
+                 bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
+        tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
+
+        body = tk.Frame(self.root, bg=BG_DARK, padx=32, pady=18)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Machine UUID — à envoyer au vendeur
+        tk.Label(body, text="Votre identifiant machine (a envoyer a contact.amah.officiel@gmail.com) :",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Consolas", 9), anchor="w").pack(fill=tk.X)
+
+        uuid_frame = tk.Frame(body, bg="#2a2a27", pady=8)
+        uuid_frame.pack(fill=tk.X, pady=(4, 14))
+        tk.Label(uuid_frame, text=self.machine_id,
+                 bg="#2a2a27", fg=GOLD, font=("Consolas", 11, "bold")).pack(side=tk.LEFT, padx=12)
+        tk.Button(uuid_frame, text="Copier", bg=GOLD_DIM, fg=BG_DARK,
+                  font=("Consolas", 9), relief=tk.FLAT, padx=8, pady=2,
+                  cursor="hand2", command=self._copy_uuid).pack(side=tk.RIGHT, padx=8)
+
+        # Clé de licence
+        tk.Label(body, text="Cle de licence :",
+                 bg=BG_DARK, fg=GOLD, font=("Consolas", 10, "bold"), anchor="w").pack(fill=tk.X)
+        tk.Label(body, text="Format : XXXXX-XXXXX-XXXXX-XXXXX",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Consolas", 9), anchor="w").pack(fill=tk.X, pady=(0, 4))
+
+        self.v_key = tk.StringVar()
+        tk.Entry(body, textvariable=self.v_key,
+                 bg="#2a2a27", fg=TEXT_WHITE, insertbackground=GOLD,
+                 font=("Consolas", 12), relief=tk.FLAT, bd=4).pack(fill=tk.X, pady=(0, 4))
+
+        self.v_err = tk.StringVar()
+        tk.Label(body, textvariable=self.v_err, bg=BG_DARK,
+                 fg=RED, font=("Consolas", 10)).pack(pady=(4, 8))
+
+        tk.Button(body, text="Activer Amah", bg=GOLD_DIM, fg=BG_DARK,
+                  font=("Consolas", 11, "bold"), relief=tk.FLAT,
+                  padx=20, pady=6, cursor="hand2", command=self._validate).pack()
+
+        tk.Label(body,
+                 text="Pour obtenir votre cle : contact.amah.officiel@gmail.com",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Consolas", 9)).pack(pady=(14, 0))
+
+    def _copy_uuid(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.machine_id)
+
+    def _validate(self):
+        from tools.license import validate_license
+        key = self.v_key.get().strip()
+        if not key:
+            self.v_err.set("Veuillez entrer votre cle de licence.")
+            return
+        if not validate_license(key):
+            self.v_err.set("Cle invalide. Verifiez la cle ou contactez le support.")
+            return
+        # Clé valide — sauvegarder dans .env
+        content = self.env_path.read_text(encoding='utf-8') if self.env_path.exists() else ""
+        if "AMAH_LICENSE_KEY" in content:
+            import re
+            content = re.sub(r"AMAH_LICENSE_KEY=.*", f"AMAH_LICENSE_KEY={key}", content)
+        else:
+            content += f"\nAMAH_LICENSE_KEY={key}\n"
+        self.env_path.write_text(content, encoding='utf-8')
+        load_dotenv(self.env_path, override=True)
+        self.on_complete()
+
+
 # ── Point d'entrée ──────────────────────────────────────────────────────────
 
 def main():
@@ -534,16 +663,28 @@ def main():
 
     root = tk.Tk()
 
+    def launch_amah():
+        for w in root.winfo_children():
+            w.destroy()
+        root.geometry("960x700")
+        root.resizable(True, True)
+        AmahGUI(root)
+
+    def check_license():
+        from tools.license import is_licensed
+        if not is_licensed():
+            LicenseWindow(root, launch_amah, env_path)
+        else:
+            launch_amah()
+
     if not os.getenv('GROQ_API_KEY'):
-        def launch():
+        def after_setup():
             for w in root.winfo_children():
                 w.destroy()
-            root.geometry("960x700")
-            root.resizable(True, True)
-            AmahGUI(root)
-        SetupWindow(root, launch, env_path)
+            check_license()
+        SetupWindow(root, after_setup, env_path)
     else:
-        AmahGUI(root)
+        check_license()
 
     root.mainloop()
 

@@ -1,8 +1,23 @@
 from playwright.sync_api import sync_playwright, Browser, Page
+import atexit
 
 _playwright = None
 _browser: Browser = None
 _page: Page = None
+
+
+def _close_browser():
+    global _browser, _playwright
+    try:
+        if _browser and _browser.is_connected():
+            _browser.close()
+        if _playwright:
+            _playwright.stop()
+    except Exception:
+        pass
+
+
+atexit.register(_close_browser)
 
 
 def _ensure_browser():

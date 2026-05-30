@@ -2,6 +2,9 @@
 .env
 token.json
 credentials.json
+git/
+*.txt.token
+ghp_*
 
 # Base de données locale
 amah_memory.db

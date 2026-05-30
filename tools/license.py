@@ -10,9 +10,8 @@ import subprocess
 import sys
 import os
 
-# Clé secrète partagée — NE JAMAIS PARTAGER
-# Change cette valeur avant chaque distribution
-_SECRET = b"amah-agent-2026-mk-secret-key-v1"
+# Clé secrète lue depuis .env (AMAH_LICENSE_SECRET) ; fallback sur valeur par défaut
+_SECRET = os.getenv("AMAH_LICENSE_SECRET", "amah-agent-2026-mk-secret-key-v1").encode()
 
 
 def get_machine_id() -> str:
@@ -51,7 +50,7 @@ def validate_license(key: str) -> bool:
     """Valide une clé de licence sur cette machine."""
     machine_id = get_machine_id()
     if machine_id == "UNKNOWN":
-        return True  # Fail open si impossible de lire l'ID machine
+        return False  # Fail closed : refuse si l'ID machine est illisible
     expected = generate_license_key(machine_id)
     clean_key = key.upper().replace("-", "").replace(" ", "")
     clean_exp = expected.upper().replace("-", "")

@@ -1,7 +1,10 @@
 import sys
 import sqlite3
+import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+
+log = logging.getLogger("amah.memory")
 
 if getattr(sys, 'frozen', False):
     DB_PATH = Path(sys.executable).parent / "amah_memory.db"
@@ -34,18 +37,26 @@ def _connect():
 
 def save_message(session_id: str, role: str, content: str) -> None:
     try:
-        conn = _connect()
-        conn.execute(
-            "INSERT INTO conversations (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (session_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO conversations (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+    except Exception as e:
+        log.warning("save_message failed: %s", e)
 
 
-def load_recent_messages(limit: int = 40) -> list:
+def cleanup_old_messages(days: int = 90) -> None:
+    """Supprime les messages de conversation de plus de X jours."""
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM conversations WHERE created_at < ?", (cutoff,))
+    except Exception as e:
+        log.warning("cleanup_old_messages failed: %s", e)
+
+
+def load_recent_messages(limit: int = 20) -> list:
     try:
         conn = _connect()
         rows = conn.execute(
@@ -54,7 +65,8 @@ def load_recent_messages(limit: int = 40) -> list:
         ).fetchall()
         conn.close()
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-    except Exception:
+    except Exception as e:
+        log.warning("load_recent_messages failed: %s", e)
         return []
 
 
