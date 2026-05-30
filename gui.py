@@ -1,7 +1,9 @@
 import os
 import sys
 import json
+import time
 import threading
+import traceback
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from datetime import datetime
@@ -434,20 +436,44 @@ class AmahGUI:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
 
     def _trim_messages(self):
-        if len(self.messages) > MAX_MESSAGES + 1:
-            self.messages = [self.messages[0]] + self.messages[-MAX_MESSAGES:]
+        """Garde system prompt + MAX_MESSAGES derniers messages.
+        Préserve les paires tool_call/tool_result pour éviter les erreurs API."""
+        if len(self.messages) <= MAX_MESSAGES + 1:
+            return
+        system  = self.messages[0]
+        tail    = self.messages[-MAX_MESSAGES:]
+        # S'assurer qu'on ne coupe pas une paire tool_call orpheline
+        while tail and tail[0].get("role") == "tool":
+            tail = tail[1:]
+        self.messages = [system] + tail
 
-    def _chat(self) -> str:
-        self._trim_messages()
-
-        response = self.client.chat.completions.create(
+    def _groq_call(self, messages, tools=None):
+        """Appel Groq avec retry backoff exponentiel (1s, 2s, 4s) sur 429/503."""
+        delays = [1, 2, 4]
+        kwargs = dict(
             model=MODEL,
-            messages=self.messages,
-            tools=TOOLS_DEFINITIONS,
-            tool_choice="auto",
+            messages=messages,
             max_tokens=2048,
             temperature=0.4,
         )
+        if tools:
+            kwargs["tools"]       = tools
+            kwargs["tool_choice"] = "auto"
+
+        for attempt, delay in enumerate(delays):
+            try:
+                return self.client.chat.completions.create(**kwargs)
+            except Exception as e:
+                err = str(e)
+                if ("429" in err or "503" in err or "rate_limit" in err) and attempt < len(delays) - 1:
+                    self.root.after(0, self._set_status, f"Limite atteinte — attente {delay}s...")
+                    time.sleep(delay)
+                else:
+                    raise
+
+    def _chat(self) -> str:
+        self._trim_messages()
+        response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
 
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
@@ -474,14 +500,7 @@ class AmahGUI:
                 })
 
             self._trim_messages()
-            response = self.client.chat.completions.create(
-                model=MODEL,
-                messages=self.messages,
-                tools=TOOLS_DEFINITIONS,
-                tool_choice="auto",
-                max_tokens=2048,
-                temperature=0.4,
-            )
+            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
 
         return response.choices[0].message.content
 
@@ -653,13 +672,51 @@ class LicenseWindow:
         self.on_complete()
 
 
+# ── Rapport de crash automatique ────────────────────────────────────────────
+
+def _setup_crash_reporter():
+    original = sys.excepthook
+
+    def _handler(exc_type, exc_value, exc_tb):
+        try:
+            tb   = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            body = f"CRASH AMAH AGENT\n\n{tb}\n\nVersion: 1.0.0\nDate: {datetime.now()}"
+            from tools.email_tool import send_email
+            send_email("contact.amah.officiel@gmail.com", "Amah Agent — Crash rapport", body)
+        except Exception:
+            pass
+        original(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _handler
+
+
+# ── Check Playwright ─────────────────────────────────────────────────────────
+
+def _check_playwright() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright
+        import os
+        p    = sync_playwright().start()
+        path = p.chromium.executable_path
+        p.stop()
+        return os.path.exists(path)
+    except Exception:
+        return False
+
+
 # ── Point d'entrée ──────────────────────────────────────────────────────────
 
 def main():
+    _setup_crash_reporter()
+
     env_path = (Path(sys.executable).parent / '.env'
                 if getattr(sys, 'frozen', False)
                 else Path(__file__).parent / '.env')
     load_dotenv(env_path)
+
+    # Avertissement Playwright non bloquant
+    if not _check_playwright():
+        print("[WARN] Chromium non installe — outils navigateur indisponibles")
 
     root = tk.Tk()
 

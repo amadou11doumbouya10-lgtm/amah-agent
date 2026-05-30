@@ -2,9 +2,37 @@ import urllib.request
 import urllib.parse
 import re
 import json
+import time
+
+# ── Cache LRU simple (TTL 10 minutes) ───────────────────────────────────────
+_cache: dict = {}
+_CACHE_TTL   = 600  # secondes
+
+
+def _cache_get(key: str):
+    if key in _cache:
+        value, ts = _cache[key]
+        if time.time() - ts < _CACHE_TTL:
+            return value
+        del _cache[key]
+    return None
+
+
+def _cache_set(key: str, value):
+    # Limite le cache à 50 entrées
+    if len(_cache) >= 50:
+        oldest = min(_cache, key=lambda k: _cache[k][1])
+        del _cache[oldest]
+    _cache[key] = (value, time.time())
 
 
 def web_search(query: str, num_results: int = 5) -> dict:
+    cache_key = f"search:{query}:{num_results}"
+    cached = _cache_get(cache_key)
+    if cached:
+        cached["cache"] = True
+        return cached
+
     try:
         from ddgs import DDGS
     except ImportError:
@@ -17,20 +45,26 @@ def web_search(query: str, num_results: int = 5) -> dict:
                 results.append({
                     "titre":   r.get("title", ""),
                     "url":     r.get("href", ""),
-                    "résumé":  r.get("body", ""),
+                    "resume":  r.get("body", ""),
                 })
 
-        return {
+        result = {
             "success":   True,
             "query":     query,
-            "résultats": results,
+            "resultats": results,
             "total":     len(results),
         }
+        _cache_set(cache_key, result)
+        return result
     except Exception as e:
         return {"error": str(e)}
 
 
 def read_webpage(url: str) -> dict:
+    cached = _cache_get(f"page:{url}")
+    if cached:
+        cached["cache"] = True
+        return cached
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
@@ -62,11 +96,9 @@ def read_webpage(url: str) -> dict:
         if len(text) > 6000:
             text = text[:6000] + "\n\n[... contenu tronqué ...]"
 
-        return {
-            "success": True,
-            "url":     url,
-            "contenu": text,
-        }
+        result = {"success": True, "url": url, "contenu": text}
+        _cache_set(f"page:{url}", result)
+        return result
     except urllib.error.URLError as e:
         return {"error": f"Impossible d'accéder à l'URL : {e}"}
     except Exception as e:

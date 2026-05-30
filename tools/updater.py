@@ -14,9 +14,9 @@ CURRENT_VERSION = "1.0.0"
 # URL où tu héberges les infos de version — à mettre à jour avant distribution
 # Format du fichier JSON attendu :
 # {"version": "1.1.0", "url": "https://ton-site.com/dist/Amah Agent.exe", "notes": "Corrections de bugs"}
-VERSION_URL = "https://raw.githubusercontent.com/ton-compte/amah-agent/main/version.json"
+VERSION_URL = "https://raw.githubusercontent.com/amadou11doumbouya10-lgtm/amah-agent/main/version.json"
 
-_URL_IS_PLACEHOLDER = "ton-compte" in VERSION_URL
+_URL_IS_PLACEHOLDER = False
 
 
 def check_update() -> dict:
