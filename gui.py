@@ -435,6 +435,26 @@ class AmahGUI:
         except Exception as e:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
 
+    # Mots qui indiquent qu'un outil est nécessaire
+    _ACTION_WORDS = {
+        "liste","cree","creer","ouvre","ouvrir","cherche","chercher","envoie",
+        "envoyer","lit","lire","lis","organise","organiser","montre","calcule",
+        "calculer","traduis","traduire","meteo","temps","screenshot","capture",
+        "zip","archive","excel","email","mail","navigateur","recherche","trouve",
+        "deplace","copie","supprime","ferme","lance","execute","telecharge",
+        "rappel","notification","parle","dis","qr","code","convertis","reseau",
+        "ip","processus","memorise","souviens","stats","mise","version","licence",
+        "bureau","documents","fichier","dossier","word","pdf","txt","image","photo",
+        "mot de passe","password","clipboard","presse","traduction","planifie",
+        "tache","rappelle","notifie","speak","listen","read","create","find",
+        "get","set","open","close","send","show","make","write","run",
+    }
+
+    def _needs_tools(self, message: str) -> bool:
+        """Retourne True si le message nécessite l'appel d'un outil."""
+        words = set(message.lower().replace("'", " ").split())
+        return bool(words & self._ACTION_WORDS)
+
     def _trim_messages(self):
         """Garde system prompt + MAX_MESSAGES derniers messages.
         Préserve les paires tool_call/tool_result pour éviter les erreurs API."""
@@ -473,7 +493,20 @@ class AmahGUI:
 
     def _chat(self) -> str:
         self._trim_messages()
-        response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
+
+        # Routeur d'intention — envoie les outils seulement si nécessaire
+        last_user = next(
+            (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
+        )
+        tools = TOOLS_DEFINITIONS if self._needs_tools(last_user) else None
+        if not tools:
+            self.root.after(0, self._set_status, "Amah reflechit (mode rapide)...")
+
+        response = self._groq_call(self.messages, tools=tools)
+
+        # Si le modèle veut un outil mais qu'on n'en a pas envoyé → relancer avec outils
+        if response.choices[0].finish_reason == "tool_calls" and not tools:
+            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
 
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
