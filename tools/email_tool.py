@@ -4,6 +4,7 @@ import smtplib
 import email
 from email.mime.text import MIMEText
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 
 IMAP_HOST = 'imap.gmail.com'
 SMTP_HOST = 'smtp.gmail.com'
@@ -54,9 +55,10 @@ def _extract_body(msg) -> str:
 
 def read_emails(n: int = 5) -> dict:
     """
-    Lit les N derniers emails Gmail.
-    Utilise les UIDs (uniques, assignés dans l'ordre de réception dans Gmail)
-    pour garantir de lire les messages les plus récents.
+    Lit les N derniers emails Gmail triés par DATE réelle.
+    Stratégie : récupère les N*4 derniers UIDs, lit leurs en-têtes de date,
+    trie par date décroissante, retourne les N plus récents.
+    Cela garantit les vrais derniers emails même si les UIDs ne sont pas chronologiques.
     """
     conn = None
     try:
@@ -65,28 +67,73 @@ def read_emails(n: int = 5) -> dict:
         conn.login(address, password)
         conn.select('INBOX')
 
-        # UID SEARCH ALL — retourne tous les UIDs dans l'ordre croissant
-        # Les derniers UIDs = les messages les plus récents dans Gmail
-        _, data = conn.uid('SEARCH', None, 'ALL')
+        # 1. Emails des 14 derniers jours (pool suffisant, requête rapide)
+        from datetime import datetime, timedelta
+        since = (datetime.now() - timedelta(days=14)).strftime("%d-%b-%Y")
+        _, data = conn.uid('SEARCH', None, f'SINCE {since}')
         all_uids = data[0].split() if data[0] else []
+
+        if not all_uids:
+            # Fallback : 60 derniers messages toutes dates
+            _, data = conn.uid('SEARCH', None, 'ALL')
+            all_uids = (data[0].split() if data[0] else [])[-60:]
 
         if not all_uids:
             return {'success': True, 'total': 0, 'emails': [], 'message': 'Boite vide'}
 
-        # Prend les N derniers UIDs (plus récents) et inverse pour avoir le plus récent en premier
-        latest_uids = all_uids[-n:][::-1]
+        # 2. Prend les N*3 derniers UIDs comme candidats
+        pool_size = min(len(all_uids), n * 3)
+        candidate_uids = all_uids[-pool_size:]
 
+        # 3. Récupère en-têtes DATE + FROM + SUBJECT + LIST-UNSUBSCRIBE pour chaque candidat
+        # LIST-UNSUBSCRIBE est présent dans TOUS les newsletters — absent dans les emails perso
+        emails_with_date = []
+        for uid in candidate_uids:
+            _, hdr_data = conn.uid(
+                'FETCH', uid,
+                '(BODY.PEEK[HEADER.FIELDS (DATE FROM SUBJECT LIST-UNSUBSCRIBE)])'
+            )
+            if not hdr_data or not hdr_data[0] or not isinstance(hdr_data[0], tuple):
+                continue
+            hdr          = email.message_from_bytes(hdr_data[0][1])
+            date_str     = hdr.get('Date', '')
+            from_str     = _decode(hdr.get('From', ''))
+            subj_str     = _decode(hdr.get('Subject', ''))
+            is_newsletter = bool(hdr.get('List-Unsubscribe', ''))
+            try:
+                dt = parsedate_to_datetime(date_str)
+            except Exception:
+                dt = None
+            emails_with_date.append((uid, dt, date_str, from_str, subj_str, is_newsletter))
+
+        # 4. Trie par date décroissante
+        emails_with_date.sort(
+            key=lambda x: x[1].timestamp() if x[1] else 0,
+            reverse=True
+        )
+
+        # 4b. Priorité aux emails personnels (sans List-Unsubscribe = pas un newsletter)
+        personal = [e for e in emails_with_date if not e[5]]   # sans List-Unsubscribe
+        promo    = [e for e in emails_with_date if e[5]]        # avec List-Unsubscribe
+        # Emails perso en premier (déjà triés par date), puis newsletters si pas assez
+        ranked = personal + promo
+        top_n  = ranked[:n]
+
+        # 5. Télécharge le corps uniquement pour les N sélectionnés
         emails = []
-        for uid in latest_uids:
+        for uid, dt, date_str, de, sujet, _ in top_n:
             _, msg_data = conn.uid('FETCH', uid, '(RFC822)')
             if not msg_data or not msg_data[0]:
+                # Fallback si le corps n'est pas dispo
+                emails.append({'de': de, 'sujet': sujet,
+                               'date': date_str, 'extrait': '(corps non disponible)'})
                 continue
             msg  = email.message_from_bytes(msg_data[0][1])
             body = _extract_body(msg)
             emails.append({
-                'de':      _decode(msg.get('From', '')),
-                'sujet':   _decode(msg.get('Subject', '')),
-                'date':    msg.get('Date', ''),
+                'de':      _decode(msg.get('From', de)),
+                'sujet':   _decode(msg.get('Subject', sujet)),
+                'date':    msg.get('Date', date_str),
                 'extrait': body[:300].strip(),
             })
 
