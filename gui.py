@@ -471,9 +471,12 @@ class AmahGUI:
         "page":"internet","contenu":"internet","lis-la":"internet","scrape":"internet",
         # email
         "email":"email","emails":"email","mail":"email","mails":"email","boite":"email",
-        "envoie":"email","envoyer":"email","envoyer":"email","lis-mes":"email",
+        "envoie":"email","envoyer":"email","lis-mes":"email","dernier-email":"email",
         "send":"email","gmail":"email","message":"email","reponse":"email","repond":"email",
         "expediteur":"email","sujet":"email","piece":"email","jointe":"email",
+        "inbox":"email","reception":"email","nouveau":"email","nouveaux":"email",
+        "recus":"email","recu":"email","non-lu":"email","nonlu":"email",
+        "messagerie":"email","courrier":"email","courriel":"email",
         # mémoire
         "memorise":"memoire","souviens":"memoire","rappelle":"memoire","memoire":"memoire",
         "retiens":"memoire","note":"memoire","notes":"memoire","oublie":"memoire",
@@ -613,9 +616,13 @@ class AmahGUI:
         # Si aucun outil ciblé détecté → envoie un petit set par défaut (les plus fréquents)
         # au lieu de rien (évite le double appel et les faux négatifs)
         if not tools:
+            # Outils par défaut — couvre les demandes les plus fréquentes
+            # IMPORTANT : inclut read_emails et web_search car souvent demandés
+            # sans mots-clés évidents (ex: "mon dernier gmail", "cherche ça")
             DEFAULT_TOOLS = {
                 "web_search","read_webpage","list_files","create_word",
                 "get_datetime","calculate","save_memory","get_memories",
+                "read_emails","send_email","get_system_info","speak",
             }
             tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in DEFAULT_TOOLS]
             self.root.after(0, self._set_status, "Amah reflechit...")
