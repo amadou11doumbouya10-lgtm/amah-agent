@@ -53,25 +53,32 @@ def _extract_body(msg) -> str:
 
 
 def read_emails(n: int = 5) -> dict:
+    """
+    Lit les N derniers emails Gmail.
+    Utilise les UIDs (uniques, assignés dans l'ordre de réception dans Gmail)
+    pour garantir de lire les messages les plus récents.
+    """
     conn = None
     try:
         address, password = _creds()
         conn = imaplib.IMAP4_SSL(IMAP_HOST)
         conn.login(address, password)
-        _, data = conn.select('INBOX')
-        total = int(data[0])  # nombre total de messages
+        conn.select('INBOX')
 
-        if total == 0:
-            conn.logout()
+        # UID SEARCH ALL — retourne tous les UIDs dans l'ordre croissant
+        # Les derniers UIDs = les messages les plus récents dans Gmail
+        _, data = conn.uid('SEARCH', None, 'ALL')
+        all_uids = data[0].split() if data[0] else []
+
+        if not all_uids:
             return {'success': True, 'total': 0, 'emails': [], 'message': 'Boite vide'}
 
-        # Numéros de séquence IMAP — toujours chronologiques
-        start = max(1, total - n + 1)
-        sequence = list(range(total, start - 1, -1))  # du plus récent au plus ancien
+        # Prend les N derniers UIDs (plus récents) et inverse pour avoir le plus récent en premier
+        latest_uids = all_uids[-n:][::-1]
 
         emails = []
-        for num in sequence:
-            _, msg_data = conn.fetch(str(num), '(RFC822)')
+        for uid in latest_uids:
+            _, msg_data = conn.uid('FETCH', uid, '(RFC822)')
             if not msg_data or not msg_data[0]:
                 continue
             msg  = email.message_from_bytes(msg_data[0][1])

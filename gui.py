@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS
-from tools.memory import save_message, load_recent_messages, cleanup_old_messages
+from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
 
 # ── Couleurs ────────────────────────────────────────────────────────────────
 BG_DARK    = "#1a1a17"
@@ -28,7 +28,7 @@ TEXT_TOOL  = "#9a7a45"
 RED        = "#c0392b"
 GREEN      = "#27ae60"
 
-MAX_MESSAGES = 40
+MAX_MESSAGES = 16
 
 TOOL_LABELS = {
     "list_files":      "lecture dossier",
@@ -75,20 +75,28 @@ class AmahGUI:
         self.root.geometry("960x700")
         self.root.minsize(720, 520)
 
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
+        # Rotation de clés API — charge toutes les clés disponibles
+        self._api_keys = [k for k in [
+            os.getenv("GROQ_API_KEY"),
+            os.getenv("GROQ_API_KEY_2"),
+            os.getenv("GROQ_API_KEY_3"),
+        ] if k and not k.startswith("AJOUTER")]
+
+        if not self._api_keys:
             messagebox.showerror("Cle manquante",
                 "GROQ_API_KEY introuvable dans le fichier .env")
             sys.exit(1)
 
-        self.client         = Groq(api_key=api_key)
+        self._key_index = 0
+        self.client     = Groq(api_key=self._api_keys[0])
         self.session_id     = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.busy           = False
         self._last_reply    = ""
         self._tools_this_call = []   # outils utilisés dans l'appel en cours
 
-        cleanup_old_messages(days=90)          # nettoie les messages > 90 jours
-        previous             = load_recent_messages(limit=20)
+        cleanup_old_messages(days=90)          # purge messages > 90 jours
+        truncate_old_tool_results(max_chars=800)  # tronque tool_results longs en DB
+        previous             = load_recent_messages(limit=10)  # 10 suffisent
         self.messages        = [{"role": "system", "content": SYSTEM_PROMPT}] + previous
         self._previous_count = len(previous)
 
@@ -435,25 +443,107 @@ class AmahGUI:
         except Exception as e:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
 
-    # Mots qui indiquent qu'un outil est nécessaire
-    _ACTION_WORDS = {
-        "liste","cree","creer","ouvre","ouvrir","cherche","chercher","envoie",
-        "envoyer","lit","lire","lis","organise","organiser","montre","calcule",
-        "calculer","traduis","traduire","meteo","temps","screenshot","capture",
-        "zip","archive","excel","email","mail","navigateur","recherche","trouve",
-        "deplace","copie","supprime","ferme","lance","execute","telecharge",
-        "rappel","notification","parle","dis","qr","code","convertis","reseau",
-        "ip","processus","memorise","souviens","stats","mise","version","licence",
-        "bureau","documents","fichier","dossier","word","pdf","txt","image","photo",
-        "mot de passe","password","clipboard","presse","traduction","planifie",
-        "tache","rappelle","notifie","speak","listen","read","create","find",
-        "get","set","open","close","send","show","make","write","run",
+    # Mots clés → catégorie d'outils (élargi pour couvrir un maximum de cas)
+    _WORD_TO_CAT = {
+        # fichiers
+        "liste":"fichiers","lister":"fichiers","fichier":"fichiers","fichiers":"fichiers",
+        "dossier":"fichiers","dossiers":"fichiers","trouve":"fichiers","trouver":"fichiers",
+        "deplace":"fichiers","organise":"fichiers","organiser":"fichiers","classe":"fichiers",
+        "lis":"fichiers","lire":"fichiers","lit":"fichiers","affiche":"fichiers",
+        "montre":"fichiers","montre-moi":"fichiers","montrer":"fichiers","vois":"fichiers",
+        "find":"fichiers","read":"fichiers","bureau":"fichiers","desktop":"fichiers",
+        "downloads":"fichiers","telechargements":"fichiers","taille":"fichiers",
+        "renomme":"fichiers","supprime":"fichiers","copie":"fichiers","deplace":"fichiers",
+        # documents
+        "word":"documents","pdf":"documents","txt":"documents","document":"documents",
+        "rapport":"documents","cree":"documents","creer":"documents","genere":"documents",
+        "generer":"documents","redige":"documents","rediger":"documents","ecrit":"documents",
+        "ecrire":"documents","fais":"documents","faire":"documents","prepare":"documents",
+        "write":"documents","create":"documents","make":"documents","resume":"documents",
+        "synthese":"documents","lettre":"documents","contrat":"documents","facture":"documents",
+        # internet / navigateur
+        "web":"internet","recherche":"internet","rechercher":"internet","site":"internet",
+        "navigateur":"internet","ouvre":"internet","ouvrir":"internet","visite":"internet",
+        "cherche":"internet","chercher":"internet","url":"internet","open":"internet",
+        "click":"internet","clique":"internet","screenshot":"internet","capture":"internet",
+        "telecharge":"internet","linkedin":"internet","google":"internet","youtube":"internet",
+        "instagram":"internet","navigue":"internet","va":"internet","vas":"internet",
+        "page":"internet","contenu":"internet","lis-la":"internet","scrape":"internet",
+        # email
+        "email":"email","emails":"email","mail":"email","mails":"email","boite":"email",
+        "envoie":"email","envoyer":"email","envoyer":"email","lis-mes":"email",
+        "send":"email","gmail":"email","message":"email","reponse":"email","repond":"email",
+        "expediteur":"email","sujet":"email","piece":"email","jointe":"email",
+        # mémoire
+        "memorise":"memoire","souviens":"memoire","rappelle":"memoire","memoire":"memoire",
+        "retiens":"memoire","note":"memoire","notes":"memoire","oublie":"memoire",
+        "sais":"memoire","sait":"memoire","preference":"memoire","info":"memoire",
+        # système
+        "systeme":"systeme","processus":"systeme","process":"systeme","reseau":"systeme",
+        "ip":"systeme","commande":"systeme","run":"systeme","execute":"systeme",
+        "lance":"systeme","ferme":"systeme","ram":"systeme","cpu":"systeme",
+        "disque":"systeme","windows":"systeme","pc":"systeme","ordinateur":"systeme",
+        # utilitaires / calcul
+        "calcule":"utils","calculer":"utils","convertis":"utils","convertir":"utils",
+        "date":"utils","heure":"utils","password":"utils","passe":"utils","genere":"utils",
+        "zip":"utils","archive":"utils","qr":"utils","code":"utils","qrcode":"utils",
+        "combien":"utils","quel":"utils","quand":"utils","dans":"utils","depuis":"utils",
+        "ajoute":"utils","ajouter":"utils","jours":"utils","mois":"utils","annee":"utils",
+        # data (Excel, presse-papiers)
+        "excel":"data","tableau":"data","tableur":"data","xlsx":"data","csv":"data",
+        "clipboard":"data","presse-papiers":"data","copier":"data","coller":"data",
+        "contenu-presse":"data","presse":"data",
+        # médias / voix
+        "parle":"media","dis":"media","dis-moi":"media","voix":"media","speak":"media",
+        "ecoute":"media","microphone":"media","micro":"media","notification":"media",
+        "notifie":"media","alerte":"media","rappel":"media","rappelle-moi":"media",
+        "dans-x-minutes":"media","dans-x-heures":"media","bip":"media",
+        "screenshot-ecran":"media","capture-ecran":"media","ecran":"media",
+        # images
+        "image":"images","images":"images","photo":"images","photos":"images",
+        "redimensionne":"images","resize":"images","convertis-image":"images",
+        "png":"images","jpg":"images","jpeg":"images","webp":"images","bmp":"images",
+        # météo / info / traduction
+        "meteo":"info","temps":"info","temperature":"info","previsions":"info",
+        "traduis":"info","traduire":"info","traduction":"info","langue":"info",
+        "translate":"info","stats":"info","statistiques":"info","version":"info",
+        "licence":"info","mise-a-jour":"info","update":"info","pluie":"info","soleil":"info",
+        # planificateur
+        "planifie":"planif","planifier":"planif","tache":"planif","taches":"planif",
+        "planificateur":"planif","cron":"planif","automatique":"planif","chaque":"planif",
+        "quotidien":"planif","hebdo":"planif","programme":"planif",
     }
 
-    def _needs_tools(self, message: str) -> bool:
-        """Retourne True si le message nécessite l'appel d'un outil."""
-        words = set(message.lower().replace("'", " ").split())
-        return bool(words & self._ACTION_WORDS)
+    # Catégories → noms d'outils inclus
+    _CAT_TOOLS = {
+        "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","get_folder_info"},
+        "documents": {"create_word","create_txt","create_pdf","read_document"},
+        "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text"},
+        "email":     {"read_emails","send_email","search_emails"},
+        "memoire":   {"save_memory","get_memories","delete_memory"},
+        "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info"},
+        "utils":     {"calculate","get_datetime","add_days","generate_password","convert_units","zip_files","unzip_file","list_archive","create_qrcode"},
+        "data":      {"read_excel","create_excel","append_to_excel","read_clipboard","write_clipboard"},
+        "media":     {"speak","listen","listen_continuous","send_notification","set_reminder","screenshot_full"},
+        "images":    {"resize_image","get_image_info","convert_image"},
+        "info":      {"get_weather","get_weather_simple","translate","detect_language","get_stats","check_update","get_current_version","get_license_info"},
+        "planif":    {"create_daily_task","list_tasks","delete_task","run_task_now"},
+    }
+
+    def _select_tools(self, message: str):
+        """Retourne la sous-liste TOOLS_DEFINITIONS pertinente, ou None si pas d'outil."""
+        words = message.lower().replace("'", " ").split()
+        cats = set()
+        for w in words:
+            cat = self._WORD_TO_CAT.get(w)
+            if cat:
+                cats.add(cat)
+        if not cats:
+            return None
+        needed = set()
+        for cat in cats:
+            needed |= self._CAT_TOOLS.get(cat, set())
+        return [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in needed]
 
     def _trim_messages(self):
         """Garde system prompt + MAX_MESSAGES derniers messages.
@@ -467,26 +557,47 @@ class AmahGUI:
             tail = tail[1:]
         self.messages = [system] + tail
 
-    def _groq_call(self, messages, tools=None):
-        """Appel Groq avec retry backoff exponentiel (1s, 2s, 4s) sur 429/503."""
-        delays = [1, 2, 4]
-        kwargs = dict(
-            model=MODEL,
-            messages=messages,
-            max_tokens=2048,
-            temperature=0.4,
-        )
-        if tools:
-            kwargs["tools"]       = tools
-            kwargs["tool_choice"] = "auto"
+    def _next_key(self):
+        """Bascule vers la clé API suivante disponible."""
+        nb = len(self._api_keys)
+        if nb <= 1:
+            return False
+        self._key_index = (self._key_index + 1) % nb
+        self.client = Groq(api_key=self._api_keys[self._key_index])
+        return True
 
-        for attempt, delay in enumerate(delays):
+    def _groq_call(self, messages, tools=None):
+        """Appel Groq avec rotation de clés + retry backoff (1s, 2s, 4s)."""
+        kwargs = dict(model=MODEL, messages=messages, max_tokens=1024, temperature=0.4)
+        if tools:
+            kwargs["tools"] = tools; kwargs["tool_choice"] = "auto"
+
+        keys_tried = 0
+        delays     = [1, 2, 4]
+
+        for attempt in range(len(delays) * len(self._api_keys)):
             try:
                 return self.client.chat.completions.create(**kwargs)
             except Exception as e:
                 err = str(e)
-                if ("429" in err or "503" in err or "rate_limit" in err) and attempt < len(delays) - 1:
-                    self.root.after(0, self._set_status, f"Limite atteinte — attente {delay}s...")
+                is_limit = "429" in err or "rate_limit" in err or "TPD" in err or "TPM" in err
+
+                if is_limit:
+                    # Essaie d'abord de changer de clé
+                    if keys_tried < len(self._api_keys) - 1 and self._next_key():
+                        keys_tried += 1
+                        nb_keys = len(self._api_keys)
+                        idx     = self._key_index + 1
+                        self.root.after(0, self._set_status,
+                            f"Cle {idx}/{nb_keys} — limite atteinte, rotation...")
+                        continue
+                    # Plus de clé dispo → attente backoff
+                    delay = delays[min(attempt, len(delays)-1)]
+                    self.root.after(0, self._set_status,
+                        f"Toutes les cles limitees — attente {delay}s...")
+                    time.sleep(delay)
+                elif "503" in err:
+                    delay = delays[min(attempt, len(delays)-1)]
                     time.sleep(delay)
                 else:
                     raise
@@ -494,19 +605,31 @@ class AmahGUI:
     def _chat(self) -> str:
         self._trim_messages()
 
-        # Routeur d'intention — envoie les outils seulement si nécessaire
+        # Sélection ciblée des outils : envoie uniquement la catégorie pertinente
         last_user = next(
             (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
         )
-        tools = TOOLS_DEFINITIONS if self._needs_tools(last_user) else None
+        tools = self._select_tools(last_user)
+        # Si aucun outil ciblé détecté → envoie un petit set par défaut (les plus fréquents)
+        # au lieu de rien (évite le double appel et les faux négatifs)
         if not tools:
-            self.root.after(0, self._set_status, "Amah reflechit (mode rapide)...")
+            DEFAULT_TOOLS = {
+                "web_search","read_webpage","list_files","create_word",
+                "get_datetime","calculate","save_memory","get_memories",
+            }
+            tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in DEFAULT_TOOLS]
+            self.root.after(0, self._set_status, "Amah reflechit...")
+        else:
+            self.root.after(0, self._set_status, "Amah reflechit (outils cibles)...")
 
         response = self._groq_call(self.messages, tools=tools)
 
-        # Si le modèle veut un outil mais qu'on n'en a pas envoyé → relancer avec outils
-        if response.choices[0].finish_reason == "tool_calls" and not tools:
-            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
+        # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous
+        if response.choices[0].finish_reason == "tool_calls":
+            tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
+            available  = {t["function"]["name"] for t in tools}
+            if not tool_names.issubset(available):
+                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
 
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
@@ -526,6 +649,10 @@ class AmahGUI:
 
             for tc in msg.tool_calls:
                 result = self._execute_tool(tc)
+                # Tronque les résultats trop longs pour économiser les tokens
+                # (emails, fichiers, pages web peuvent faire des milliers de tokens)
+                if len(result) > 2000:
+                    result = result[:2000] + "\n...[tronqué pour économiser les tokens]"
                 self.messages.append({
                     "role":         "tool",
                     "tool_call_id": tc.id,
@@ -548,12 +675,12 @@ class SetupWindow:
 
         self.root.title("Amah Agent — Configuration")
         self.root.configure(bg=BG_DARK)
-        self.root.geometry("620x490")
+        self.root.geometry("660x680")
         self.root.resizable(False, False)
         self._build()
 
     def _build(self):
-        hdr = tk.Frame(self.root, bg=BG_PANEL, pady=14)
+        hdr = tk.Frame(self.root, bg=BG_PANEL, pady=12)
         hdr.pack(fill=tk.X)
         tk.Label(hdr, text="THE AMAH - PREMIER LANCEMENT",
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
@@ -561,25 +688,73 @@ class SetupWindow:
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
-        body = tk.Frame(self.root, bg=BG_DARK, padx=32, pady=20)
+        # Scrollable si besoin
+        body = tk.Frame(self.root, bg=BG_DARK, padx=28, pady=14)
         body.pack(fill=tk.BOTH, expand=True)
 
-        self._lbl(body, "Cle API Groq", "obligatoire · console.groq.com (gratuit)")
-        self.v_groq = tk.StringVar()
-        tk.Entry(body, textvariable=self.v_groq, show="*", **self._es()).pack(fill=tk.X, pady=(0, 16))
+        # ── Section Groq ──────────────────────────────────────────────────────
+        tk.Frame(body, bg=GOLD_DIM, height=1).pack(fill=tk.X, pady=(0, 10))
+
+        # Bannière info clés multiples
+        info = tk.Frame(body, bg="#1e1c10", pady=6, padx=10)
+        info.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(info, text="3 cles = 3x plus d'appels par jour (gratuit)",
+                 bg="#1e1c10", fg=GOLD, font=("Consolas", 9, "bold")).pack(anchor="w")
+        tk.Label(info, text="Cree jusqu'a 3 comptes gratuits sur console.groq.com",
+                 bg="#1e1c10", fg=TEXT_DIM, font=("Consolas", 9)).pack(anchor="w")
+
+        self._lbl(body, "Cle Groq n1", "obligatoire · console.groq.com")
+        self.v_groq1 = tk.StringVar()
+        tk.Entry(body, textvariable=self.v_groq1, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
+
+        self._lbl(body, "Cle Groq n2", "optionnel · 2eme compte = +100 000 tokens/jour")
+        self.v_groq2 = tk.StringVar()
+        tk.Entry(body, textvariable=self.v_groq2, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
+
+        self._lbl(body, "Cle Groq n3", "optionnel · 3eme compte = +100 000 tokens/jour")
+        self.v_groq3 = tk.StringVar()
+        tk.Entry(body, textvariable=self.v_groq3, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
+
+        # ── Section Licence ───────────────────────────────────────────────────
+        tk.Frame(body, bg=GOLD_DIM, height=1).pack(fill=tk.X, pady=(4, 10))
+
+        self._lbl(body, "Cle de licence", "obligatoire · fournie par contact.amah.officiel@gmail.com")
+        self.v_licence = tk.StringVar()
+        lic_frame = tk.Frame(body, bg=BG_DARK)
+        lic_frame.pack(fill=tk.X, pady=(0, 10))
+        tk.Entry(lic_frame, textvariable=self.v_licence,
+                 bg="#2a2a27", fg=TEXT_WHITE, insertbackground=GOLD,
+                 font=("Consolas", 11), relief=tk.FLAT, bd=4).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(lic_frame, text="UUID", bg="#2a2a27", fg=TEXT_DIM,
+                  font=("Consolas", 9), relief=tk.FLAT, padx=8,
+                  cursor="hand2", command=self._copy_uuid).pack(side=tk.LEFT, padx=(6, 0))
+
+        # UUID machine (pour le client)
+        from tools.license import get_machine_id as _gmid
+        self._machine_id = _gmid()
+        uuid_lbl = tk.Frame(body, bg="#1a1a10", pady=4, padx=8)
+        uuid_lbl.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(uuid_lbl, text="Votre identifiant machine (a envoyer pour obtenir la cle) :",
+                 bg="#1a1a10", fg=TEXT_DIM, font=("Consolas", 8)).pack(anchor="w")
+        tk.Label(uuid_lbl, text=self._machine_id,
+                 bg="#1a1a10", fg=GOLD, font=("Consolas", 10, "bold")).pack(anchor="w")
+
+        # ── Section Gmail ─────────────────────────────────────────────────────
+        tk.Frame(body, bg=GOLD_DIM, height=1).pack(fill=tk.X, pady=(4, 10))
 
         self._lbl(body, "Adresse Gmail", "optionnel · pour lire et envoyer des emails")
         self.v_gmail = tk.StringVar(value="contact.amah.officiel@gmail.com")
-        tk.Entry(body, textvariable=self.v_gmail, **self._es()).pack(fill=tk.X, pady=(0, 16))
+        tk.Entry(body, textvariable=self.v_gmail, **self._es()).pack(fill=tk.X, pady=(0, 10))
 
-        self._lbl(body, "Mot de passe d'application Gmail",
+        self._lbl(body, "Mot de passe application Gmail",
                   "optionnel · Compte Google > Securite > Mots de passe des applications")
         self.v_pwd = tk.StringVar()
-        tk.Entry(body, textvariable=self.v_pwd, show="*", **self._es()).pack(fill=tk.X, pady=(0, 20))
+        tk.Entry(body, textvariable=self.v_pwd, show="*", **self._es()).pack(fill=tk.X, pady=(0, 14))
 
+        # ── Erreur + bouton ───────────────────────────────────────────────────
         self.v_err = tk.StringVar()
         tk.Label(body, textvariable=self.v_err, bg=BG_DARK,
-                 fg=RED, font=("Consolas", 10)).pack(pady=(0, 8))
+                 fg=RED, font=("Consolas", 10)).pack(pady=(0, 6))
 
         tk.Button(body, text="Demarrer Amah", bg=GOLD_DIM, fg=BG_DARK,
                   font=("Consolas", 11, "bold"), relief=tk.FLAT,
@@ -589,26 +764,41 @@ class SetupWindow:
         tk.Label(parent, text=title, bg=BG_DARK, fg=GOLD,
                  font=("Consolas", 10, "bold"), anchor="w").pack(fill=tk.X)
         tk.Label(parent, text=hint, bg=BG_DARK, fg=TEXT_DIM,
-                 font=("Consolas", 9), anchor="w").pack(fill=tk.X, pady=(0, 4))
+                 font=("Consolas", 9), anchor="w").pack(fill=tk.X, pady=(0, 3))
 
     def _es(self):
         return dict(bg="#2a2a27", fg=TEXT_WHITE, insertbackground=GOLD,
                     font=("Consolas", 11), relief=tk.FLAT, bd=4)
 
-    def _save(self):
-        groq  = self.v_groq.get().strip()
-        gmail = self.v_gmail.get().strip()
-        pwd   = self.v_pwd.get().strip()
+    def _copy_uuid(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self._machine_id)
 
-        if not groq:
-            self.v_err.set("La cle Groq est obligatoire.")
+    def _save(self):
+        from tools.license import validate_license
+        groq1   = self.v_groq1.get().strip()
+        groq2   = self.v_groq2.get().strip()
+        groq3   = self.v_groq3.get().strip()
+        licence = self.v_licence.get().strip()
+        gmail   = self.v_gmail.get().strip()
+        pwd     = self.v_pwd.get().strip()
+
+        if not groq1:
+            self.v_err.set("La cle Groq n1 est obligatoire.")
+            return
+        if not licence:
+            self.v_err.set("La cle de licence est obligatoire.")
+            return
+        if not validate_license(licence):
+            self.v_err.set("Cle de licence invalide. Contactez contact.amah.officiel@gmail.com")
             return
 
-        lines = [f"GROQ_API_KEY={groq}\n"]
-        if gmail:
-            lines.append(f"GMAIL_ADDRESS={gmail}\n")
-        if pwd:
-            lines.append(f"GMAIL_APP_PASSWORD={pwd}\n")
+        lines = [f"GROQ_API_KEY={groq1}\n"]
+        if groq2:   lines.append(f"GROQ_API_KEY_2={groq2}\n")
+        if groq3:   lines.append(f"GROQ_API_KEY_3={groq3}\n")
+        lines.append(f"AMAH_LICENSE_KEY={licence}\n")
+        if gmail:   lines.append(f"GMAIL_ADDRESS={gmail}\n")
+        if pwd:     lines.append(f"GMAIL_APP_PASSWORD={pwd}\n")
 
         self.env_path.write_text(''.join(lines), encoding='utf-8')
         load_dotenv(self.env_path, override=True)
@@ -726,15 +916,13 @@ def _setup_crash_reporter():
 # ── Check Playwright ─────────────────────────────────────────────────────────
 
 def _check_playwright() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
-        import os
-        p    = sync_playwright().start()
-        path = p.chromium.executable_path
-        p.stop()
-        return os.path.exists(path)
-    except Exception:
-        return False
+    """Vérifie si Chromium est installé — simple vérification de fichier, pas de lancement."""
+    import glob
+    pattern = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "ms-playwright", "chromium*", "chrome-win", "chrome.exe"
+    )
+    return bool(glob.glob(pattern))
 
 
 # ── Point d'entrée ──────────────────────────────────────────────────────────
@@ -763,17 +951,20 @@ def main():
     def check_license():
         from tools.license import is_licensed
         if not is_licensed():
+            # Licence manquante → LicenseWindow de secours (si .env existe sans licence)
             LicenseWindow(root, launch_amah, env_path)
         else:
             launch_amah()
 
     if not os.getenv('GROQ_API_KEY'):
+        # Premier lancement — tout dans SetupWindow (Groq + Licence + Gmail)
         def after_setup():
             for w in root.winfo_children():
                 w.destroy()
-            check_license()
+            launch_amah()  # Licence déjà validée dans SetupWindow._save()
         SetupWindow(root, after_setup, env_path)
     else:
+        # .env existe — vérifie la licence
         check_license()
 
     root.mainloop()

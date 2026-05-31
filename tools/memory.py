@@ -56,6 +56,23 @@ def cleanup_old_messages(days: int = 90) -> None:
         log.warning("cleanup_old_messages failed: %s", e)
 
 
+def truncate_old_tool_results(max_chars: int = 800) -> None:
+    """Tronque rétroactivement les tool_results trop longs dans la DB."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT id, content FROM conversations WHERE role='tool' AND length(content) > ?",
+                (max_chars,)
+            ).fetchall()
+            for row_id, content in rows:
+                truncated = content[:max_chars] + "...[tronque]"
+                conn.execute("UPDATE conversations SET content=? WHERE id=?", (truncated, row_id))
+            if rows:
+                log.warning("truncate_old_tool_results: %d messages tronques", len(rows))
+    except Exception as e:
+        log.warning("truncate_old_tool_results failed: %s", e)
+
+
 def load_recent_messages(limit: int = 20) -> list:
     try:
         conn = _connect()
