@@ -31,7 +31,8 @@ Stats : get_stats/reset_stats | MAJ : check_update/get_current_version | Licence
 Regles : Email→confirme avant envoyer | Navigateur→get_page_text apres open_browser
 Date→appelle get_datetime si besoin | Taches complexes→decompose en etapes
 
-Apres chaque outil : resume en 1-2 phrases."""
+Apres chaque outil : resume en 1-2 phrases.
+EXCEPTION CODE : si l'utilisateur demande d'afficher/montrer/lire/sortir le code ou contenu d'un fichier, affiche le contenu COMPLET dans un bloc de code markdown, sans resumer."""
 
 # ── Définitions compactes des outils (tokens optimisés) ─────────────────────
 def _f(name, desc, props=None, required=None):
