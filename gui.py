@@ -714,10 +714,12 @@ class SetupWindow:
     def _build(self):
         hdr = tk.Frame(self.root, bg=BG_PANEL, pady=12)
         hdr.pack(fill=tk.X)
-        tk.Label(hdr, text="THE AMAH - PREMIER LANCEMENT",
+        tk.Label(hdr, text="THE AMAH — PREMIER LANCEMENT",
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
         tk.Label(hdr, text="Configure tes acces pour demarrer",
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
+        tk.Label(hdr, text="v1.3.0  ·  65 outils  ·  Windows 11",
+                 bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
         # Scrollable si besoin
@@ -862,6 +864,8 @@ class LicenseWindow:
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
         tk.Label(hdr, text="Une cle de licence est requise pour utiliser Amah Agent",
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
+        tk.Label(hdr, text="v1.3.0  ·  65 outils  ·  Windows 11",
+                 bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
         body = tk.Frame(self.root, bg=BG_DARK, padx=32, pady=18)
