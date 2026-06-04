@@ -4,6 +4,7 @@
 Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit). 65 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
+Version actuelle : **v1.3.0**
 
 ## Structure
 ```
@@ -20,7 +21,11 @@ amah-agent/
 ├── Guide_Installation_Client.docx ← Guide Word professionnel pour clients
 ├── Amah_Agent_Documentation.docx  ← Documentation complète du projet
 ├── generate_icon.py          ← Génère l'icône .ico (vectoriel Pillow)
-├── amah.ico                  ← Icône officielle (A doré, cadre doré)
+├── recreate_ico.py           ← Recrée le .ico depuis le logo SVG hexagone
+├── convert_logo.py           ← Convertit le SVG hexagone en PNG + ICO
+├── amah.ico                  ← Icône officielle hexagone (A doré + œil cyan)
+├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
+├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
 │   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (65 outils)
 │   ├── files.py              ← Gestion fichiers/dossiers (7 outils)
@@ -48,18 +53,20 @@ amah-agent/
 ├── developpeur/              ← Documentation technique interne
 │   ├── README_DEVELOPPEUR.md
 │   ├── GUIDE_LICENCE.md
+│   ├── GUIDE_LICENCE_COMPLET.docx
 │   ├── GUIDE_BUILD.md
 │   ├── GUIDE_MISE_A_JOUR.md
 │   ├── GUIDE_AJOUT_OUTIL.md
 │   └── generate_license.bat
 ├── idees/                    ← Notes et idées du projet
 ├── analyse-ia/               ← Briefs pour analyse externe par d'autres IA
+├── voix/                     ← Scripts et fichiers vidéos de présentation
 ├── dist/                     ← Dossier de distribution (généré par build.bat)
-│   ├── Amah Agent.exe        (114 Mo, standalone, 65 outils)
+│   ├── Amah Agent.exe        (125 Mo, standalone, 65 outils, logo hexagone)
 │   ├── .env                  (Gmail pré-configuré, Groq à renseigner)
 │   ├── installer_navigateur.bat
-│   └── Guide_Installation_Client.docx
-├── .env                      ← Clé API Groq + Gmail (NE PAS partager)
+│   └── GUIDE_INSTALLATION.md
+├── .env                      ← Clé API Groq + Gmail + Licence (NE PAS partager)
 ├── .env.example              ← Modèle à copier
 └── requirements.txt          ← Dépendances Python
 ```
@@ -81,6 +88,7 @@ build.bat                                 # compiler le .exe pour distribution
 - Gratuit sur https://console.groq.com
 - 30 requêtes/minute, 14 400/jour
 - Format : gsk_...
+- Rotation 3 clés : GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3 → 200 appels/jour
 
 ### Gmail (optionnel)
 - Compte : contact.amah.officiel@gmail.com
@@ -88,17 +96,18 @@ build.bat                                 # compiler le .exe pour distribution
 - Mot de passe d'application dans .env (GMAIL_APP_PASSWORD)
 - IMAP activé dans les paramètres Gmail
 
-### Licence (optionnel — pour clients)
+### Licence (obligatoire pour clients)
 - AMAH_LICENSE_KEY dans .env
 - Générée avec : py -3.13 tools/license.py <machine_uuid>
 - Ou double-clic sur developpeur/generate_license.bat
+- Clé secrète dans .env (AMAH_LICENSE_SECRET)
 
-## Modèle utilisé
-- llama-3.3-70b-versatile (le plus capable de Groq)
-- Défini dans config.py ligne MODEL
+## Modèles utilisés (routage automatique)
+- **Questions simples** (≤6 mots, salutation) : `llama-3.1-8b-instant` (~0.3s)
+- **Tâches avec outils** : `llama-3.3-70b-versatile` (~2s)
+- Défini dans gui.py → `_chat()` + constante `MODEL` dans config.py
 
 ## Les 65 outils
-
 ### Fichiers — tools/files.py (7)
 list_files, organize_folder, find_files, move_file, create_folder, read_file, get_folder_info
 
@@ -106,7 +115,7 @@ list_files, organize_folder, find_files, move_file, create_folder, read_file, ge
 create_word, create_txt, create_pdf, read_document
 
 ### Recherche — tools/search.py (2)
-web_search (DuckDuckGo), read_webpage
+web_search (DuckDuckGo + cache LRU 10min), read_webpage
 
 ### Système — tools/system.py (3)
 get_system_info, open_file, run_command (PowerShell sécurisé)
@@ -116,6 +125,7 @@ save_memory(content, category), get_memories(category), delete_memory(memory_id)
 
 ### Email — tools/email_tool.py (3)
 read_emails(n), send_email(to, subject, body), search_emails(query)
+Auth : SMTP/IMAP + mot de passe application. Tri par date UTC + priorité emails perso.
 
 ### Navigateur — tools/browser.py (5)
 open_browser(url), click_element(selector), fill_form(selector, value),
@@ -171,11 +181,19 @@ check_update(), get_current_version()
 get_license_info()
 
 ## Architecture mémoire (amah_memory.db)
-- Table conversations : historique auto de chaque échange
-- Table memories : infos mémorisées explicitement
+- Table conversations : historique auto de chaque échange (session_id, role, content)
+- Table memories : infos mémorisées explicitement (category, content)
 - Table tool_usage : statistiques d'utilisation des outils
-- Au démarrage : 40 derniers messages rechargés automatiquement
-- Trimming contexte : system prompt + 60 derniers messages max
+- Au démarrage : 10 derniers messages rechargés automatiquement
+- Trimming contexte API : [system] + 40 derniers messages max
+- Troncature tool_results : 2000 chars en mémoire vive, 800 chars en DB
+
+## Optimisations tokens (v1.3)
+- Descriptions outils compactes : 16 914 chars (~4 228 tokens)
+- Routeur d'intention : 90+ mots-clés → 8-12 outils ciblés par appel
+- DEFAULT_TOOLS (12 outils) si aucun mot-clé détecté
+- Tokens/appel typique : ~1 500 (vs ~13 000 avant)
+- Appels/jour avec 3 clés : ~200
 
 ## Interfaces disponibles
 ### Terminal (agent.py)
@@ -184,71 +202,53 @@ get_license_info()
 
 ### Fenêtre graphique (gui.py)
 - Lance avec : py -3.13 gui.py
-- Écran de configuration au premier lancement (crée .env automatiquement)
-- Horodatage sur chaque message
-- Affichage des outils utilisés inline
-- Barre d'état en bas (Prêt / réfléchit... / outil utilisé)
-- Entrée multi-ligne (Shift+Entrée)
-- Boutons Copier + Réinitialiser
-- Raccourcis : Ctrl+R reset, Ctrl+C copier, Échap vider
+- Écran de configuration premier lancement (3 clés Groq + licence + Gmail)
+- Horodatage, outils affichés après réponse, barre état, multi-ligne
+- v1.3.0 visible sur tous les écrans
 
 ## Système de licence
-- Offline — pas besoin de serveur
-- Clé liée au Machine UUID Windows de chaque PC
+- Offline HMAC-SHA256 lié au Machine UUID Windows
+- Clé secrète dans .env (AMAH_LICENSE_SECRET)
 - Génération : py -3.13 tools/license.py <machine_uuid>
-- Ou : double-clic developpeur/generate_license.bat
-- Clé secrète dans tools/license.py (_SECRET)
-- Voir developpeur/GUIDE_LICENCE.md pour le détail complet
+- LicenseWindow intégrée dans SetupWindow (premier lancement)
+- UUID affiché + bouton Copier dans l'écran de config
 
 ## Distribution clients
 Le dossier dist/ contient tout ce qu'il faut livrer :
-- Amah Agent.exe (114 Mo, standalone, 65 outils)
-- .env (Gmail pré-configuré, Groq à renseigner par le client)
+- Amah Agent.exe (125 Mo, standalone, 65 outils, v1.3.0)
+- .env (Gmail pré-configuré, Groq + Licence à renseigner)
 - installer_navigateur.bat (Chromium, une seule fois)
-- Guide_Installation_Client.docx (guide Word professionnel)
+- GUIDE_INSTALLATION.md (guide complet)
 
 ## Sécurité
-- run_command bloque : rm -rf, del /f, format, shutdown, net user, reg delete
+- run_command bloque : rm -rf, invoke-expression, wget, & && || ` $(
 - Clé API dans .env (jamais dans le code ni dans le .exe)
-- Mot de passe Gmail dans .env (jamais dans le code)
-- .env.example ne contient jamais de vraies credentials
+- Mot de passe Gmail dans .env
+- .env.example sans vraies credentials
 - Clé de licence liée au hardware (non transférable)
+- Tool results tronqués à 2000 chars (protection injection/fuites)
 
-## Etat — Session 1 (28/05/2026)
-- [x] 16 outils fonctionnels, interface terminal Rich
-- [x] Bugs corrigés (tool_calls None, args null, chemins, ddgs)
+## GitHub
+- Repo : github.com/amadou11doumbouya10-lgtm/amah-agent
+- Profil : github.com/amadou11doumbouya10-lgtm
+- Portfolio : amadou11doumbouya10-lgtm.github.io/-theamah-streaming/portfolio.html
 
-## Etat — Session 2 (28/05/2026)
-- [x] Interface graphique tkinter, raccourci bureau
-- [x] Mémoire SQLite (conversations + memories)
-- [x] 3 outils mémoire
-
-## Etat — Session 3 (28-29/05/2026)
-- [x] Packaging .exe PyInstaller, écran config premier lancement
-- [x] Email Gmail SMTP/IMAP (3 outils)
-- [x] Navigation web Playwright (5 outils)
-- [x] Guide installation clients, installer_navigateur.bat
-- [x] 27 outils au total
-
-## Etat — Session 4 (29/05/2026)
-- [x] Refactorisation : TOOL_FUNCTIONS centralisé dans tools/__init__.py
-- [x] Trimming contexte : max 60 messages
-- [x] Mémoire augmentée à 40 messages
-- [x] Voix (synthèse Windows), notifications, rappels
-- [x] Excel (3 outils), presse-papiers, calcul, date, archives, images
-- [x] Réseau, processus, météo, traducteur, QR code
-- [x] Reconnaissance vocale, planificateur Windows
-- [x] Statistiques d'usage, mises à jour auto, licence offline
-- [x] Interface améliorée : horodatage, outils inline, barre état, multi-ligne
-- [x] Icône vectorielle professionnelle (A doré sur fond sombre)
-- [x] Documentation Word complète, guide client Word
-- [x] Dossier developpeur/ avec 5 guides techniques
-- [x] 65 outils au total — .exe 114 Mo
+## Etat — v1.3.0 (04/06/2026)
+- [x] Routage modèle : 8B (questions simples) / 70B (tool use)
+- [x] Logo hexagone officiel (SVG + PNG 680px + ICO recadré)
+- [x] Email : tri par date UTC réelle + priorité emails personnels
+- [x] Démarrage <1s (check Playwright sans lancer le moteur)
+- [x] Tokens -75% : routeur 90+ mots-clés + descriptions compactes
+- [x] 3 clés Groq en rotation automatique (200 appels/jour)
+- [x] SetupWindow : 3 clés Groq + licence + Gmail en un écran
+- [x] Version v1.3.0 sur tous les écrans (config, licence, header)
+- [x] README profil GitHub + Portfolio mis à jour
 
 ## Prochaines améliorations possibles
-- [ ] Activer la vérification de licence au démarrage (actuellement optionnelle)
-- [ ] Héberger version.json pour les mises à jour automatiques
-- [ ] Outil Google Calendar (agenda)
-- [ ] Synthèse vocale mode mains libres (listen + speak en boucle)
-- [ ] Connexion Telegram bot
+- [ ] Activer vérification licence sur ventes (remplacer fail-open par fail-closed)
+- [ ] Licence entreprise volume (une clé pour N postes)
+- [ ] Google Calendar (agenda)
+- [ ] Mode mains libres (listen + speak en boucle)
+- [ ] Streaming réponse Groq dans tkinter
 - [ ] Dashboard journalier automatique
+- [ ] Connexion Telegram bot
