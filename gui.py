@@ -463,17 +463,22 @@ class AmahGUI:
         "word":"documents","pdf":"documents","txt":"documents","document":"documents",
         "rapport":"documents","cree":"documents","creer":"documents","genere":"documents",
         "generer":"documents","redige":"documents","rediger":"documents","ecrit":"documents",
-        "ecrire":"documents","fais":"documents","faire":"documents","prepare":"documents",
+        "ecrire":"documents","prepare":"documents",
         "write":"documents","create":"documents","make":"documents","resume":"documents",
         "synthese":"documents","lettre":"documents","contrat":"documents","facture":"documents",
         # internet / navigateur
         "web":"internet","recherche":"internet","rechercher":"internet","site":"internet",
-        "navigateur":"internet","ouvre":"internet","ouvrir":"internet","visite":"internet",
-        "cherche":"internet","chercher":"internet","url":"internet","open":"internet",
+        "navigateur":"internet","visite":"internet",
+        "cherche":"internet","chercher":"internet","url":"internet",
         "click":"internet","clique":"internet","screenshot":"internet","capture":"internet",
         "telecharge":"internet","linkedin":"internet","google":"internet","youtube":"internet",
-        "instagram":"internet","navigue":"internet","va":"internet","vas":"internet",
+        "instagram":"internet","navigue":"internet",
         "page":"internet","contenu":"internet","lis-la":"internet","scrape":"internet",
+        # ouvrir = systeme (open_file) EN PRIORITÉ sur internet
+        # L'utilisateur dit "ouvre" pour ouvrir un fichier/dossier local
+        "ouvre":"systeme","ouvrir":"systeme","open":"systeme","va":"systeme","vas":"systeme",
+        "lance":"systeme","lancer":"systeme","affiche":"systeme","afficher":"systeme",
+        "editeur":"systeme","vscode":"systeme","notepad":"systeme","montre":"systeme",
         # email
         "email":"email","emails":"email","mail":"email","mails":"email","boite":"email",
         "envoie":"email","envoyer":"email","lis-mes":"email","dernier-email":"email",
@@ -642,6 +647,7 @@ class AmahGUI:
             active_model = MODEL
             DEFAULT_TOOLS = {
                 "web_search","read_webpage","list_files","read_file",
+                "open_file","run_command",          # ouvrir/lancer des fichiers
                 "create_word","get_datetime","calculate",
                 "save_memory","get_memories","read_emails",
                 "send_email","get_system_info","speak",
@@ -860,13 +866,7 @@ class LicenseWindow:
         # En-tête
         hdr = tk.Frame(self.root, bg=BG_PANEL, pady=14)
         hdr.pack(fill=tk.X)
-        tk.Label(hdr, text="THE AMAH — ACTIVATION",
-                 bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
-        tk.Label(hdr, text="Une cle de licence est requise pour utiliser Amah Agent",
-                 bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
-        tk.Label(hdr, text="v1.3.0  ·  65 outils  ·  Windows 11",
-                 bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
-        tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
+
 
         body = tk.Frame(self.root, bg=BG_DARK, padx=32, pady=18)
         body.pack(fill=tk.BOTH, expand=True)
