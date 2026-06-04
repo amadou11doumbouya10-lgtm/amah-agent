@@ -1,4 +1,4 @@
-from tools.files            import list_files, organize_folder, find_files, move_file, create_folder, read_file, get_folder_info
+from tools.files            import list_files, organize_folder, find_files, move_file, create_folder, read_file, write_file, edit_file, get_folder_info
 from tools.documents   import create_word, create_txt, create_pdf, read_document
 from tools.search      import web_search, read_webpage
 from tools.system      import get_system_info, open_file, run_command
@@ -28,6 +28,8 @@ TOOL_FUNCTIONS = {
     "move_file":         move_file,
     "create_folder":     create_folder,
     "read_file":         read_file,
+    "write_file":        write_file,
+    "edit_file":         edit_file,
     "get_folder_info":   get_folder_info,
     "create_word":       create_word,
     "create_txt":        create_txt,

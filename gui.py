@@ -454,6 +454,12 @@ class AmahGUI:
         "find":"fichiers","read":"fichiers","bureau":"fichiers","desktop":"fichiers",
         "downloads":"fichiers","telechargements":"fichiers","taille":"fichiers",
         "renomme":"fichiers","supprime":"fichiers","copie":"fichiers",
+        # écriture / modification de fichiers → systeme ou fichiers
+        "modifie":"fichiers","modifier":"fichiers","change":"fichiers","changer":"fichiers",
+        "ecris":"fichiers","ecrire":"fichiers","remplace":"fichiers","remplacer":"fichiers",
+        "corrige":"fichiers","corriger":"fichiers","mets":"fichiers","mettre":"fichiers",
+        "insere":"fichiers","inserer":"fichiers","ajoute":"fichiers","ajouter":"fichiers",
+        "supprime-ligne":"fichiers","edite":"fichiers","editer":"fichiers",
         # extensions de fichiers → toujours catégorie fichiers
         "html":"fichiers","htm":"fichiers","index":"fichiers","css":"fichiers",
         "js":"fichiers","py":"fichiers","json":"fichiers","xml":"fichiers",

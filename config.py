@@ -13,7 +13,7 @@ SYSTEM_PROMPT = f"""Tu es Amah — assistante IA locale, precise et efficace. Tu
 PC : Bureau={_DESKTOP} | Documents={_DOCUMENTS} | Downloads={_DOWNLOADS}
 
 REGLE : Appelle TOUJOURS un outil pour agir. Ne reponds jamais par du texte seul.
-Fichiers : list_files/organize_folder/find_files/move_file/create_folder/read_file/get_folder_info
+Fichiers : list_files/organize_folder/find_files/move_file/create_folder/read_file/write_file/edit_file/get_folder_info
 Docs : create_word/create_pdf/create_txt/read_document
 Web : web_search/read_webpage/open_browser/click_element/fill_form/get_page_text
 Systeme : get_system_info/open_file/run_command/list_processes/get_network_info
@@ -54,6 +54,8 @@ TOOLS_DEFINITIONS = [
     _f("move_file",       "Deplace ou renomme un fichier",      {"source": _s("source"), "destination": _s("dest")}, ["source","destination"]),
     _f("create_folder",   "Cree un dossier",                    {"path": _s("chemin")}, ["path"]),
     _f("read_file",       "Lit un fichier texte",               {"path": _s("chemin")}, ["path"]),
+    _f("write_file",      "Ecrit/cree un fichier (html, py, js, css, txt...)", {"path": _s("chemin"), "content": _s("contenu complet")}, ["path","content"]),
+    _f("edit_file",       "Remplace un texte dans un fichier existant",        {"path": _s("chemin"), "old_text": _s("texte a remplacer"), "new_text": _s("nouveau texte")}, ["path","old_text","new_text"]),
     _f("get_folder_info", "Stats taille/types d'un dossier",    {"path": _s("chemin")}, ["path"]),
     # Documents
     _f("create_word",     "Cree un fichier Word",               {"filename": _s("nom"), "title": _s("titre"), "content": _s("contenu"), "save_path": _s("dossier")}, ["filename","title","content"]),

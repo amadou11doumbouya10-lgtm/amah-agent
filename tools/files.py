@@ -160,6 +160,45 @@ def read_file(path: str) -> dict:
         return {"error": str(e)}
 
 
+def write_file(path: str, content: str) -> dict:
+    """Écrit ou écrase un fichier avec le contenu donné. Supporte tous les formats : .html, .py, .js, .css, .txt..."""
+    p = Path(path).expanduser()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        size = p.stat().st_size
+        return {
+            "success": True,
+            "fichier": str(p),
+            "taille":  f"{size} octets",
+            "lignes":  content.count('\n') + 1,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def edit_file(path: str, old_text: str, new_text: str) -> dict:
+    """Remplace une portion de texte dans un fichier existant."""
+    p = Path(path).expanduser()
+    if not p.exists():
+        return {"error": f"Fichier introuvable : {path}"}
+    try:
+        content = p.read_text(encoding="utf-8", errors="replace")
+        if old_text not in content:
+            return {"error": f"Texte à remplacer introuvable dans {p.name}. Vérifiez la casse et les espaces."}
+        count   = content.count(old_text)
+        content = content.replace(old_text, new_text, 1)
+        p.write_text(content, encoding="utf-8")
+        return {
+            "success":      True,
+            "fichier":      p.name,
+            "remplacements": 1,
+            "occurrences_restantes": count - 1,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def get_folder_info(path: str) -> dict:
     p = Path(path).expanduser()
     if not p.exists():
