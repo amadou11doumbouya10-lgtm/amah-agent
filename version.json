@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
-  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.0.0/Amah-Agent.exe",
-  "notes": "Version initiale - 65 outils, licence obligatoire, securite renforcee"
+  "version": "1.3.0",
+  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.3.0/Amah-Agent.exe",
+  "notes": "v1.3 : routage modele 8B/70B, logo hexagone, email tri par date, demarrage instantane, routeur tokens optimise"
 }

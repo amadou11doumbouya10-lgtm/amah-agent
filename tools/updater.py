@@ -9,7 +9,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.3.0"
 
 # URL où tu héberges les infos de version — à mettre à jour avant distribution
 # Format du fichier JSON attendu :

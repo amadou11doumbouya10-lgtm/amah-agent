@@ -135,7 +135,7 @@ class AmahGUI:
         center.pack(expand=True)
         tk.Label(center, text="THE AMAH - AGENT LOCAL",
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
-        tk.Label(center, text="Groq  Llama 3.3  27 outils  Windows 11",
+        tk.Label(center, text="v1.3  ·  Groq  ·  65 outils  ·  Windows 11",
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
 
     def _build_chat(self):
