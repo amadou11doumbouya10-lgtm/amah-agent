@@ -453,7 +453,12 @@ class AmahGUI:
         "montre":"fichiers","montre-moi":"fichiers","montrer":"fichiers","vois":"fichiers",
         "find":"fichiers","read":"fichiers","bureau":"fichiers","desktop":"fichiers",
         "downloads":"fichiers","telechargements":"fichiers","taille":"fichiers",
-        "renomme":"fichiers","supprime":"fichiers","copie":"fichiers","deplace":"fichiers",
+        "renomme":"fichiers","supprime":"fichiers","copie":"fichiers",
+        # extensions de fichiers → toujours catégorie fichiers
+        "html":"fichiers","htm":"fichiers","index":"fichiers","css":"fichiers",
+        "js":"fichiers","py":"fichiers","json":"fichiers","xml":"fichiers",
+        "csv":"fichiers","log":"fichiers","ini":"fichiers","cfg":"fichiers",
+        "exe":"fichiers","bat":"fichiers","sh":"fichiers","md":"fichiers",
         # documents
         "word":"documents","pdf":"documents","txt":"documents","document":"documents",
         "rapport":"documents","cree":"documents","creer":"documents","genere":"documents",
@@ -569,9 +574,12 @@ class AmahGUI:
         self.client = Groq(api_key=self._api_keys[self._key_index])
         return True
 
-    def _groq_call(self, messages, tools=None):
-        """Appel Groq avec rotation de clés + retry backoff (1s, 2s, 4s)."""
-        kwargs = dict(model=MODEL, messages=messages, max_tokens=1024, temperature=0.4)
+    def _groq_call(self, messages, tools=None, model_override=None):
+        """Appel Groq avec rotation de clés + retry backoff (1s, 2s, 4s).
+        model_override : force un modèle spécifique (ex: 8B pour questions simples)
+        """
+        used_model = model_override or MODEL
+        kwargs = dict(model=used_model, messages=messages, max_tokens=1024, temperature=0.4)
         if tools:
             kwargs["tools"] = tools; kwargs["tool_choice"] = "auto"
 
@@ -613,30 +621,46 @@ class AmahGUI:
             (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
         )
         tools = self._select_tools(last_user)
-        # Si aucun outil ciblé détecté → envoie un petit set par défaut (les plus fréquents)
-        # au lieu de rien (évite le double appel et les faux négatifs)
-        if not tools:
-            # Outils par défaut — couvre les demandes les plus fréquentes
-            # IMPORTANT : inclut read_emails et web_search car souvent demandés
-            # sans mots-clés évidents (ex: "mon dernier gmail", "cherche ça")
+
+        # ── Sélection du modèle selon la complexité ───────────────────────────
+        # Questions simples (salutation, calcul rapide, date...) → 8B instant
+        # Tâches avec outils → 70B versatile (qualité + tool use)
+        SIMPLE_PATTERNS = {
+            "bonjour","bonsoir","salut","hello","hi","merci","ok","oui","non",
+            "comment","quoi","qui","quand","pourquoi","combien","cest","cest-quoi",
+            "explique","dis","repete","aide","help","test","essai",
+        }
+        words_lower = set(last_user.lower().replace("'", " ").split())
+        is_simple   = (len(last_user.split()) <= 6 and
+                       bool(words_lower & SIMPLE_PATTERNS) and
+                       not tools)
+
+        if is_simple:
+            active_model = "llama-3.1-8b-instant"
+            self.root.after(0, self._set_status, "Amah reflechit...")
+        elif not tools:
+            active_model = MODEL
             DEFAULT_TOOLS = {
-                "web_search","read_webpage","list_files","create_word",
-                "get_datetime","calculate","save_memory","get_memories",
-                "read_emails","send_email","get_system_info","speak",
+                "web_search","read_webpage","list_files","read_file",
+                "create_word","get_datetime","calculate",
+                "save_memory","get_memories","read_emails",
+                "send_email","get_system_info","speak",
             }
             tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in DEFAULT_TOOLS]
             self.root.after(0, self._set_status, "Amah reflechit...")
         else:
+            active_model = MODEL
             self.root.after(0, self._set_status, "Amah reflechit (outils cibles)...")
 
-        response = self._groq_call(self.messages, tools=tools)
+        response = self._groq_call(self.messages, tools=tools, model_override=active_model)
 
-        # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous
+        # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous (70B)
         if response.choices[0].finish_reason == "tool_calls":
             tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
-            available  = {t["function"]["name"] for t in tools}
+            available  = {t["function"]["name"] for t in (tools or [])}
             if not tool_names.issubset(available):
-                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
+                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                                           model_override=MODEL)
 
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
@@ -667,7 +691,8 @@ class AmahGUI:
                 })
 
             self._trim_messages()
-            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS)
+            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                                       model_override=MODEL)  # toujours 70B pour tool use
 
         return response.choices[0].message.content
 
