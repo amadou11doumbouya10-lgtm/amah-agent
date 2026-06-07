@@ -235,7 +235,7 @@ class AmahGUI:
         _tb("◎ mic",    self._open_voice,      fg=GOLD_DIM)
         _tb("⎘ copier", self._copy_last)
         _tb("⟳ reset",  self._reset)
-        _tb("◉ JARVIS", self._launch_voice_ui, fg=GOLD,  bg=GOLD_FAINT, bold=True)
+        _tb("◉ AMAH", self._launch_voice_ui, fg=GOLD,  bg=GOLD_FAINT, bold=True)
         _tb("⬡ écoute", self._launch_listener, fg=CYAN,  bg="#0A1020")
 
     def _build_chat(self, parent):

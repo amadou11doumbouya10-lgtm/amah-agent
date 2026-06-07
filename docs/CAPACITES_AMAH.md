@@ -162,7 +162,7 @@ Amah se souvient d'informations entre les sessions.
 | `listen_continuous` | Écoute pendant X secondes | *"Enregistre ce que je dis pendant 30 secondes"* |
 
 **Interface Vocale Plein Écran** (`◉ Mode Voix` dans l'en-tête) :
-- HUD futuriste style JARVIS — hexagone rotatif cyan, radar animé, barres audio
+- HUD futuriste style Amah — hexagone rotatif cyan, radar animé, barres audio
 - Parle → Amah répond à voix haute — en boucle complète
 
 **Mode Réveil — "Amah écoute"** (`⬡ Amah écoute` dans l'en-tête) :

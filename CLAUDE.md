@@ -251,7 +251,7 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
 - [x] GUI v1.4 : monitoring CPU/RAM temps réel, machine à écrire, bouton [+] pièce jointe
 - [x] Règle mono-appel dans le system prompt
 - [x] Routeur étendu : hardware / vision / youtube / flights / planner
-- [x] Interface vocale plein écran JARVIS (voice_fullscreen.py) — HUD cyan, hexagone rotatif, radar, barres audio
+- [x] Interface vocale plein écran Amah (voice_fullscreen.py) — HUD cyan, hexagone rotatif, radar, barres audio
 - [x] **Mot de réveil "Amah"** (amah_listener.py) — widget coin bas-droit, détection SpeechRecognition, lance plein écran automatiquement
 - [x] Bouton "⬡ Amah écoute" dans l'en-tête gui.py
 - [x] 79 outils documentés dans docs/CAPACITES_AMAH.md
