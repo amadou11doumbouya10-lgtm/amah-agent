@@ -16,17 +16,26 @@ from tools import TOOL_FUNCTIONS
 from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
 
 # ── Couleurs ────────────────────────────────────────────────────────────────
-BG_DARK    = "#1a1a17"
-BG_PANEL   = "#222220"
-BG_INPUT   = "#252522"
-GOLD       = "#c8a96e"
-GOLD_DIM   = "#7a5f38"
-GOLD_LIGHT = "#d4b97e"
-TEXT_WHITE = "#e8e0d0"
-TEXT_DIM   = "#88887a"
-TEXT_TOOL  = "#9a7a45"
-RED        = "#c0392b"
-GREEN      = "#27ae60"
+BG         = "#0D0D0B"   # fond principal
+BG2        = "#121210"   # sidebar, topbar
+BG3        = "#181815"   # input, bulles
+BG4        = "#1E1E1A"   # hover
+BORDER     = "#2A2A22"   # bordures subtiles
+BORDER2    = "#3A3A2E"   # bordures visibles
+GOLD       = "#C8A96E"
+GOLD2      = "#E8C98E"
+GOLD_DIM   = "#7A5F38"
+GOLD_FAINT = "#2A1F0A"
+TEXT       = "#E8E0D0"
+TEXT2      = "#9A9280"
+TEXT3      = "#5A5448"
+TEXT_TOOL  = "#9A7A45"
+RED        = "#C0392B"
+GREEN      = "#27AE60"
+CYAN       = "#00D4FF"
+# Aliases compat
+BG_DARK = BG; BG_PANEL = BG2; BG_INPUT = BG3
+TEXT_WHITE = TEXT; TEXT_DIM = TEXT2; GOLD_LIGHT = GOLD2
 
 MAX_MESSAGES = 16
 
@@ -64,6 +73,31 @@ TOOL_LABELS = {
     "read_excel":        "lecture Excel",
     "create_excel":      "creation Excel",
     "append_to_excel":   "ajout Excel",
+    "write_file":        "ecriture fichier",
+    "edit_file":         "edition fichier",
+    "list_processes":    "processus actifs",
+    "get_network_info":  "infos reseau",
+    # Nouveaux outils v1.4
+    "set_volume":        "reglage volume",
+    "get_audio_level":   "niveau volume",
+    "mute_audio":        "son muet/actif",
+    "set_brightness":    "luminosite ecran",
+    "get_brightness":    "lecture luminosite",
+    "wifi_toggle":       "WiFi on/off",
+    "analyze_screen":    "vision ecran IA",
+    "open_youtube":      "ouverture YouTube",
+    "search_youtube":    "recherche YouTube",
+    "play_music":        "lecture musique",
+    "search_flights":    "recherche vols",
+    "create_plan":       "planification multi-etapes",
+    # Nouveaux outils v1.5
+    "delete_file":       "suppression fichier",
+    "summarize":         "resume document",
+    "draft_email":       "brouillon email",
+    "kill_process":      "arret processus",
+    "write_code":        "ecriture code",
+    "run_code":          "execution code",
+    "explain_code":      "explication code",
 }
 
 
@@ -71,9 +105,9 @@ class AmahGUI:
     def __init__(self, root):
         self.root       = root
         self.root.title("The Amah — Agent Local")
-        self.root.configure(bg=BG_DARK)
-        self.root.geometry("960x700")
-        self.root.minsize(720, 520)
+        self.root.configure(bg=BG)
+        self.root.geometry("980x700")
+        self.root.minsize(760, 520)
 
         # Rotation de clés API — charge toutes les clés disponibles
         self._api_keys = [k for k in [
@@ -93,6 +127,7 @@ class AmahGUI:
         self.busy           = False
         self._last_reply    = ""
         self._tools_this_call = []   # outils utilisés dans l'appel en cours
+        self._voice_mode    = False  # True = réponse vocale automatique activée
 
         cleanup_old_messages(days=90)          # purge messages > 90 jours
         truncate_old_tool_results(max_chars=800)  # tronque tool_results longs en DB
@@ -103,104 +138,324 @@ class AmahGUI:
         self._build_ui()
         self._bind_shortcuts()
         self._welcome()
+        self._start_metrics()
 
     # ── Construction de l'interface ─────────────────────────────────────────
 
     def _build_ui(self):
-        self._build_header()
-        tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
-        self._build_chat()
-        tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
-        self._build_input()
-        self._build_statusbar()
+        self._build_statusbar()                           # barre du bas (pleine largeur)
+        body = tk.Frame(self.root, bg=BG)
+        body.pack(fill=tk.BOTH, expand=True)
+        self._build_sidebar(body)
+        tk.Frame(body, bg=BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
+        self._content = tk.Frame(body, bg=BG)
+        self._content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._build_topbar(self._content)
+        tk.Frame(self._content, bg=BORDER, height=1).pack(fill=tk.X)
+        self._build_chat(self._content)
+        tk.Frame(self._content, bg=BORDER, height=1).pack(fill=tk.X)
+        self._build_suggestions(self._content)
+        tk.Frame(self._content, bg=BORDER, height=1).pack(fill=tk.X)
+        self._build_input(self._content)
+        self._tools_panel_visible = False
+        self._build_tools_panel()
 
-    def _build_header(self):
-        hdr = tk.Frame(self.root, bg=BG_PANEL, pady=10)
-        hdr.pack(fill=tk.X)
+    def _build_sidebar(self, parent):
+        sb = tk.Frame(parent, bg=BG2, width=52)
+        sb.pack(side=tk.LEFT, fill=tk.Y)
+        sb.pack_propagate(False)
 
-        # Boutons à droite
-        btn_frame = tk.Frame(hdr, bg=BG_PANEL)
-        btn_frame.pack(side=tk.RIGHT, padx=14)
+        # Logo hexagone
+        tk.Button(sb, text="⬡", bg=BG2, fg=GOLD, font=("Consolas", 18),
+                  relief=tk.FLAT, bd=0, padx=0, pady=6, width=3,
+                  activebackground=BG4, activeforeground=GOLD2,
+                  cursor="hand2").pack(fill=tk.X, pady=(10, 2), padx=2)
 
-        tk.Button(btn_frame, text="Copier", bg="#2a2a27", fg=TEXT_DIM,
-                  font=("Consolas", 9), relief=tk.FLAT, padx=10, pady=3,
-                  cursor="hand2", command=self._copy_last).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Frame(sb, bg=BORDER, height=1).pack(fill=tk.X, padx=6, pady=6)
 
-        tk.Button(btn_frame, text="Reinitialiser", bg="#2a2a27", fg=GOLD_DIM,
-                  font=("Consolas", 9), relief=tk.FLAT, padx=10, pady=3,
-                  cursor="hand2", command=self._reset).pack(side=tk.LEFT)
+        def _sb(icon, label, cmd):
+            return tk.Button(sb, text=f"{icon}\n{label}", bg=BG2, fg=TEXT3,
+                             font=("Consolas", 7), relief=tk.FLAT, bd=0,
+                             padx=0, pady=5, width=6,
+                             activebackground=BG4, activeforeground=GOLD,
+                             cursor="hand2", command=cmd)
 
-        # Titre
-        center = tk.Frame(hdr, bg=BG_PANEL)
-        center.pack(expand=True)
-        tk.Label(center, text="THE AMAH - AGENT LOCAL",
-                 bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
-        tk.Label(center, text="v1.3  ·  Groq  ·  65 outils  ·  Windows 11",
-                 bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
+        _sb("⚙", "outils",  self._toggle_tools_panel).pack(fill=tk.X, pady=1, padx=2)
+        _sb("↺", "hist.",   self._nav_history).pack(fill=tk.X, pady=1, padx=2)
+        _sb("◎", "mem.",    self._nav_memory).pack(fill=tk.X, pady=1, padx=2)
+        _sb("⊕", "fich.",   self._nav_files).pack(fill=tk.X, pady=1, padx=2)
 
-    def _build_chat(self):
+        tk.Frame(sb, bg=BG2).pack(fill=tk.BOTH, expand=True)   # spacer
+
+        tk.Frame(sb, bg=BORDER, height=1).pack(fill=tk.X, padx=6, pady=4)
+        _sb("≡", "cfg.",    self._nav_settings).pack(fill=tk.X, pady=1, padx=2)
+
+        # Avatar
+        av = tk.Frame(sb, bg=GOLD_DIM, width=28, height=28)
+        av.pack_propagate(False)
+        av.pack(pady=(6, 12), padx=12)
+        tk.Label(av, text="AD", bg=GOLD_DIM, fg=BG,
+                 font=("Consolas", 7, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+
+    def _build_topbar(self, parent):
+        tb = tk.Frame(parent, bg=BG2, height=44)
+        tb.pack(fill=tk.X)
+        tb.pack_propagate(False)
+
+        # Gauche : dot de statut + texte
+        left = tk.Frame(tb, bg=BG2)
+        left.pack(side=tk.LEFT, padx=14, fill=tk.Y)
+
+        self._pulse_canvas = tk.Canvas(left, width=8, height=8, bg=BG2,
+                                        highlightthickness=0)
+        self._pulse_canvas.pack(side=tk.LEFT, pady=(18, 0))
+        self._pulse_oval = self._pulse_canvas.create_oval(1, 1, 7, 7, fill=GREEN, outline="")
+
+        self._status_var = tk.StringVar(value="AMAH // PRET")
+        self._status_lbl = tk.Label(left, textvariable=self._status_var,
+                                     bg=BG2, fg=TEXT2, font=("Consolas", 9))
+        self._status_lbl.pack(side=tk.LEFT, padx=(8, 0), pady=(14, 0))
+
+        # Droite : chip modèle + boutons d'action
+        right = tk.Frame(tb, bg=BG2)
+        right.pack(side=tk.RIGHT, padx=10, pady=6)
+
+        chip = tk.Frame(right, bg=BORDER, padx=6, pady=3)
+        chip.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(chip, text="Groq 70B/8B", bg=BORDER, fg=TEXT3,
+                 font=("Consolas", 8)).pack()
+
+        def _tb(text, cmd, fg=TEXT2, bg=BG2, bold=False):
+            f = ("Consolas", 9, "bold") if bold else ("Consolas", 9)
+            tk.Button(right, text=text, bg=bg, fg=fg, font=f,
+                      relief=tk.FLAT, padx=7, pady=3,
+                      activebackground=BG4, activeforeground=GOLD,
+                      cursor="hand2", command=cmd).pack(side=tk.LEFT, padx=2)
+
+        _tb("◎ mic",    self._open_voice,      fg=GOLD_DIM)
+        _tb("⎘ copier", self._copy_last)
+        _tb("⟳ reset",  self._reset)
+        _tb("◉ JARVIS", self._launch_voice_ui, fg=GOLD,  bg=GOLD_FAINT, bold=True)
+        _tb("⬡ écoute", self._launch_listener, fg=CYAN,  bg="#0A1020")
+
+    def _build_chat(self, parent):
+        self._chat_wrap = tk.Frame(parent, bg=BG)
+        self._chat_wrap.pack(fill=tk.BOTH, expand=True)
+
         self.chat = scrolledtext.ScrolledText(
-            self.root, bg=BG_DARK, fg=TEXT_WHITE,
+            self._chat_wrap, bg=BG, fg=TEXT,
             font=("Consolas", 11), wrap=tk.WORD,
             state=tk.DISABLED, relief=tk.FLAT,
-            padx=18, pady=14,
+            padx=20, pady=14,
         )
         self.chat.pack(fill=tk.BOTH, expand=True)
 
-        # Tags de style
-        self.chat.tag_configure("amah_lbl",   foreground=GOLD,       font=("Consolas", 11, "bold"))
-        self.chat.tag_configure("amah_txt",   foreground=TEXT_WHITE,  font=("Consolas", 11))
-        self.chat.tag_configure("user_lbl",   foreground=TEXT_DIM,    font=("Consolas", 11))
-        self.chat.tag_configure("user_txt",   foreground=TEXT_WHITE,  font=("Consolas", 11))
-        self.chat.tag_configure("dim",        foreground=GOLD_DIM,    font=("Consolas", 10))
-        self.chat.tag_configure("thinking",   foreground=GOLD_DIM,    font=("Consolas", 11, "italic"))
-        self.chat.tag_configure("tool",       foreground=TEXT_TOOL,   font=("Consolas", 10, "italic"))
-        self.chat.tag_configure("timestamp",  foreground="#4a4a42",   font=("Consolas", 9))
-        self.chat.tag_configure("error",      foreground=RED,         font=("Consolas", 10))
-        self.chat.tag_configure("separator",  foreground="#2a2a27",   font=("Consolas", 8))
+        self.chat.tag_configure("amah_lbl",  foreground=GOLD,      font=("Consolas", 11, "bold"))
+        self.chat.tag_configure("amah_txt",  foreground=TEXT,       font=("Consolas", 11))
+        self.chat.tag_configure("user_lbl",  foreground=TEXT2,      font=("Consolas", 11))
+        self.chat.tag_configure("user_txt",  foreground=TEXT,       font=("Consolas", 11))
+        self.chat.tag_configure("dim",       foreground=GOLD_DIM,   font=("Consolas", 10))
+        self.chat.tag_configure("thinking",  foreground=TEXT3,      font=("Consolas", 11, "italic"))
+        self.chat.tag_configure("tool",      foreground=TEXT_TOOL,  font=("Consolas", 10, "italic"))
+        self.chat.tag_configure("timestamp", foreground=TEXT3,      font=("Consolas", 9))
+        self.chat.tag_configure("error",     foreground=RED,        font=("Consolas", 10))
+        self.chat.tag_configure("separator", foreground=BORDER,     font=("Consolas", 8))
 
-        # Menu clic-droit
-        self._ctx_menu = tk.Menu(self.root, tearoff=0, bg=BG_PANEL,
-                                  fg=TEXT_WHITE, activebackground=GOLD_DIM)
+        self._ctx_menu = tk.Menu(self.root, tearoff=0, bg=BG2,
+                                  fg=TEXT, activebackground=GOLD_DIM)
         self._ctx_menu.add_command(label="Copier la derniere reponse", command=self._copy_last)
         self._ctx_menu.add_command(label="Tout selectionner", command=self._select_all)
         self.chat.bind("<Button-3>", self._show_ctx_menu)
 
-    def _build_input(self):
-        bar = tk.Frame(self.root, bg=BG_INPUT, pady=8)
+    def _build_suggestions(self, parent):
+        bar = tk.Frame(parent, bg=BG2, pady=5)
         bar.pack(fill=tk.X)
+        _CHIPS = [
+            ("⊡ bureau",  "Organise mon bureau"),
+            ("✉ emails",  "Lis mes 5 derniers emails"),
+            ("☁ météo",   "Météo Paris aujourd'hui"),
+            ("▤ Word",    "Crée un document Word"),
+            ("⌕ web",     "Recherche le web"),
+            ("♪ musique", "Mets de la musique"),
+        ]
+        for label, query in _CHIPS:
+            tk.Button(bar, text=label, bg=BORDER, fg=TEXT2,
+                      font=("Consolas", 8), relief=tk.FLAT, padx=8, pady=2,
+                      activebackground=BORDER2, activeforeground=GOLD,
+                      cursor="hand2",
+                      command=lambda q=query: self._send_suggestion(q)
+                      ).pack(side=tk.LEFT, padx=(8, 0), pady=3)
 
-        tk.Label(bar, text="Toi", bg=BG_INPUT, fg=TEXT_DIM,
-                 font=("Consolas", 10)).pack(side=tk.LEFT, padx=(14, 6))
-        tk.Label(bar, text=">", bg=BG_INPUT, fg=GOLD_DIM,
-                 font=("Consolas", 11, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+    def _build_input(self, parent):
+        wrap = tk.Frame(parent, bg=BG, pady=10)
+        wrap.pack(fill=tk.X)
 
-        self.entry = tk.Text(bar, height=1,
-                             bg="#2a2a27", fg=TEXT_WHITE,
+        # Cadre avec bordure simulée
+        outer = tk.Frame(wrap, bg=BORDER2, padx=1, pady=1)
+        outer.pack(fill=tk.X, padx=16)
+        box = tk.Frame(outer, bg=BG3)
+        box.pack(fill=tk.X)
+
+        self.entry = tk.Text(box, height=1, bg=BG3, fg=TEXT,
                              insertbackground=GOLD,
                              font=("Consolas", 11),
                              relief=tk.FLAT, bd=0,
                              wrap=tk.WORD)
-        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=2)
+        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(14, 4), pady=8)
 
-        self.btn = tk.Button(bar, text="Envoyer", bg=GOLD_DIM, fg=BG_DARK,
-                             font=("Consolas", 10, "bold"), relief=tk.FLAT,
-                             padx=14, pady=4, cursor="hand2", command=self._send)
-        self.btn.pack(side=tk.LEFT, padx=(8, 14))
+        self._mic_btn = tk.Button(box, text="◎", bg=BG3, fg=GOLD_DIM,
+                  font=("Consolas", 13), relief=tk.FLAT, padx=6, pady=3,
+                  activebackground=BG4, activeforeground=GOLD,
+                  cursor="hand2", command=self._open_voice)
+        self._mic_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        self.entry.bind("<Return>",       self._on_return)
-        self.entry.bind("<KeyRelease>",   self._resize_entry)
+        tk.Button(box, text="[+]", bg=BG3, fg=GOLD_DIM,
+                  font=("Consolas", 10, "bold"), relief=tk.FLAT, padx=6, pady=4,
+                  activebackground=BG4, activeforeground=GOLD,
+                  cursor="hand2", command=self._attach_file).pack(side=tk.LEFT, padx=(0, 4))
+
+        tk.Frame(box, bg=BORDER2, width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
+
+        self.btn = tk.Button(box, text="▶", bg=GOLD_DIM, fg=BG,
+                             font=("Consolas", 11, "bold"), relief=tk.FLAT,
+                             padx=10, pady=4, cursor="hand2",
+                             activebackground=GOLD, activeforeground=BG,
+                             command=self._send)
+        self.btn.pack(side=tk.LEFT, padx=(4, 8))
+
+        self.entry.bind("<Return>",     self._on_return)
+        self.entry.bind("<KeyRelease>", self._resize_entry)
         self.entry.focus()
 
     def _build_statusbar(self):
-        self._status_var = tk.StringVar(value="Pret")
-        sb = tk.Frame(self.root, bg=BG_PANEL, pady=4)
+        sb = tk.Frame(self.root, bg=BG2, pady=3)
         sb.pack(fill=tk.X, side=tk.BOTTOM)
-        tk.Label(sb, textvariable=self._status_var, bg=BG_PANEL, fg=TEXT_DIM,
-                 font=("Consolas", 9), anchor="w").pack(side=tk.LEFT, padx=14)
-        tk.Label(sb, text="Shift+Entree = retour a la ligne  |  Ctrl+R = reinitialiser  |  Ctrl+C = copier",
-                 bg=BG_PANEL, fg="#3a3a35",
-                 font=("Consolas", 8), anchor="e").pack(side=tk.RIGHT, padx=14)
+
+        self._metrics_var = tk.StringVar(value="")
+        self._metrics_lbl = tk.Label(sb, textvariable=self._metrics_var,
+                 bg=BG2, fg=TEXT3, font=("Consolas", 8))
+        self._metrics_lbl.pack(side=tk.LEFT, padx=14)
+
+        tk.Label(sb, text="Shift+Entrée = newline  ·  Ctrl+R = reset  ·  87 outils  ·  v1.5",
+                 bg=BG2, fg=TEXT3, font=("Consolas", 8), anchor="e"
+                 ).pack(side=tk.RIGHT, padx=14)
+
+    # ── Outils panel ─────────────────────────────────────────────────────────
+
+    def _build_tools_panel(self):
+        panel = tk.Frame(self._chat_wrap, bg=BG2, relief=tk.FLAT)
+
+        hdr = tk.Frame(panel, bg=BG2)
+        hdr.pack(fill=tk.X, pady=(8, 4), padx=10)
+        tk.Label(hdr, text="87 OUTILS", bg=BG2, fg=GOLD,
+                 font=("Consolas", 10, "bold")).pack(side=tk.LEFT)
+        tk.Button(hdr, text="✕", bg=BG2, fg=TEXT2, font=("Consolas", 10),
+                  relief=tk.FLAT, padx=4, cursor="hand2",
+                  command=self._toggle_tools_panel).pack(side=tk.RIGHT)
+        tk.Frame(panel, bg=BORDER, height=1).pack(fill=tk.X)
+
+        txt = tk.Text(panel, bg=BG2, fg=TEXT2, font=("Consolas", 8),
+                      wrap=tk.WORD, relief=tk.FLAT, bd=0, padx=10, pady=6)
+        scrl = tk.Scrollbar(panel, command=txt.yview, bg=BG2, width=8)
+        txt.config(yscrollcommand=scrl.set)
+        scrl.pack(side=tk.RIGHT, fill=tk.Y)
+        txt.pack(fill=tk.BOTH, expand=True)
+
+        txt.tag_configure("cat",  foreground=GOLD,  font=("Consolas", 8, "bold"))
+        txt.tag_configure("tool", foreground=TEXT2,  font=("Consolas", 8))
+
+        for cat_name, tools_list in [
+            ("Fichiers",      ["list_files","organize_folder","find_files","move_file",
+                               "create_folder","read_file","write_file","edit_file",
+                               "edit_pdf","delete_file","get_folder_info","summarize"]),
+            ("Documents",     ["create_word","create_pdf","create_txt","read_document"]),
+            ("Internet",      ["web_search","read_webpage","open_browser","click_element",
+                               "fill_form","get_page_text","take_screenshot"]),
+            ("Email",         ["read_emails","send_email","search_emails","draft_email"]),
+            ("Systeme",       ["get_system_info","open_file","run_command",
+                               "list_processes","get_network_info","kill_process"]),
+            ("Memoire",       ["save_memory","get_memories","delete_memory"]),
+            ("Code",          ["write_code","run_code","explain_code"]),
+            ("Hardware",      ["set_volume","get_audio_level","mute_audio",
+                               "set_brightness","get_brightness","wifi_toggle"]),
+            ("Vision",        ["analyze_screen","screenshot_full"]),
+            ("YouTube",       ["open_youtube","search_youtube","play_music"]),
+            ("Vols",          ["search_flights"]),
+            ("Media/Voix",    ["speak","listen","listen_continuous",
+                               "send_notification","set_reminder"]),
+            ("Excel",         ["read_excel","create_excel","append_to_excel"]),
+            ("Utilitaires",   ["calculate","get_datetime","add_days",
+                               "generate_password","convert_units"]),
+            ("Archives",      ["zip_files","unzip_file","list_archive"]),
+            ("Images",        ["resize_image","get_image_info","convert_image"]),
+            ("Meteo",         ["get_weather","get_weather_simple"]),
+            ("Traduction",    ["translate","detect_language"]),
+            ("QR/Clipboard",  ["create_qrcode","read_clipboard","write_clipboard"]),
+            ("Planif",        ["create_plan","create_daily_task","list_tasks",
+                               "delete_task","run_task_now"]),
+            ("Stats/MAJ",     ["get_stats","reset_stats","check_update",
+                               "get_current_version","get_license_info"]),
+        ]:
+            txt.insert(tk.END, f"\n{cat_name}\n", "cat")
+            for t in tools_list:
+                txt.insert(tk.END, f"  {t}\n", "tool")
+        txt.config(state=tk.DISABLED)
+        self._tools_panel = panel
+
+    def _toggle_tools_panel(self):
+        if self._tools_panel_visible:
+            self._tools_panel.place_forget()
+            self._tools_panel_visible = False
+        else:
+            self._tools_panel.place(x=0, y=0, relheight=1, width=280)
+            self._tools_panel_visible = True
+
+    # ── Sidebar actions ───────────────────────────────────────────────────────
+
+    def _send_suggestion(self, text: str):
+        if self.busy:
+            return
+        self.entry.delete("1.0", tk.END)
+        self.entry.insert("1.0", text)
+        self._send()
+
+    def _nav_history(self):
+        self._write(("\n  — Historique récent —\n", "dim"))
+        count = 0
+        for m in self.messages[1:]:
+            if m["role"] in ("user", "assistant") and count < 8:
+                who = "Toi" if m["role"] == "user" else "Amah"
+                content = str(m.get("content") or "")[:70].replace("\n", " ")
+                self._write((f"  {who}: {content}\n", "tool"))
+                count += 1
+        self._write(("\n", "dim"))
+
+    def _nav_memory(self):
+        if not self.busy:
+            self.entry.delete("1.0", tk.END)
+            self.entry.insert("1.0", "Montre-moi tout ce que tu as mémorisé")
+            self._send()
+
+    def _nav_files(self):
+        if not self.busy:
+            self.entry.delete("1.0", tk.END)
+            self.entry.insert("1.0", "Liste les fichiers de mon bureau")
+            self._send()
+
+    def _nav_settings(self):
+        self._write(("\n  Paramètres : édite le fichier .env pour changer les clés API.\n\n", "dim"))
+
+    def _pulse_dot(self):
+        """Anime le point de statut dans la topbar (pulse lent)."""
+        if not hasattr(self, '_pulse_canvas'):
+            return
+        try:
+            cur = self._pulse_canvas.itemcget(self._pulse_oval, "fill")
+            nxt = GREEN if cur != GREEN else "#1A4A2A"
+            self._pulse_canvas.itemconfig(self._pulse_oval, fill=nxt)
+        except Exception:
+            pass
+        self.root.after(900, self._pulse_dot)
 
     def _bind_shortcuts(self):
         self.root.bind("<Control-r>", lambda e: self._reset())
@@ -255,13 +510,91 @@ class AmahGUI:
 
     def _welcome(self):
         if self._previous_count > 0:
-            self._write((f"  {self._previous_count} messages de la session precedente charges.\n\n", "dim"))
-        self._write_msg("Amah >", "Tu m'as trouvee. Qu'est-ce que tu veux faire ?", "amah_lbl", "amah_txt")
-        self._write(("  Shift+Entree = retour a la ligne  |  'outils' = liste des outils\n\n", "dim"))
-        self._set_status("Pret")
+            self._write((f"  {self._previous_count} messages précédents chargés.\n\n", "dim"))
+        self._write_msg("Amah >", "Tu m'as trouvée. Qu'est-ce que tu veux faire ?", "amah_lbl", "amah_txt")
+        self._write(("  Shift+Entrée = retour ligne  ·  ⚙ = liste outils  ·  [+] = fichier\n\n", "dim"))
+        self._set_status("[OK] Pret")
+        self._pulse_dot()
 
-    def _set_status(self, text, color=None):
-        self._status_var.set(text)
+    def _set_status(self, text: str, color: str = None):
+        clean   = text.replace("[OK] ", "").replace("[!] ", "⚠ ")
+        display = f"AMAH // {clean.upper()}"
+        self._status_var.set(display)
+        if not hasattr(self, '_status_lbl'):
+            return
+        if color:
+            self._status_lbl.config(fg=color)
+        elif "PRET" in display or "COPIE" in display:
+            self._status_lbl.config(fg=GREEN)
+        elif "⚠" in display or "ERREUR" in display:
+            self._status_lbl.config(fg=RED)
+        else:
+            self._status_lbl.config(fg=GOLD)
+        try:
+            dot = RED if ("⚠" in display or "ERREUR" in display) else GREEN
+            self._pulse_canvas.itemconfig(self._pulse_oval, fill=dot)
+        except Exception:
+            pass
+
+    def _start_metrics(self):
+        """Lance le monitoring CPU/RAM en arrière-plan (mise à jour toutes les 2s)."""
+        import time
+
+        def _loop():
+            while True:
+                try:
+                    import psutil
+                    cpu = psutil.cpu_percent(interval=1)
+                    ram = psutil.virtual_memory().percent
+                    text  = f"CPU {cpu:.0f}%  RAM {ram:.0f}%"
+                    color = RED if (cpu >= 85 or ram >= 85) else (GOLD if (cpu >= 65 or ram >= 65) else GREEN)
+                    self.root.after(0, self._metrics_var.set, text)
+                    self.root.after(0, self._metrics_lbl.config, {"fg": color})
+                except Exception:
+                    pass
+                time.sleep(2)
+
+        threading.Thread(target=_loop, daemon=True).start()
+
+    def _open_voice(self):
+        """Ouvre l'interface vocale HUD animée. Active le mode voix (réponse orale auto)."""
+        if self.busy:
+            return
+        try:
+            from voice_ui import VoiceWindow
+        except ImportError as e:
+            self._write((f"  Erreur import voice_ui : {e}\n\n", "error"))
+            return
+
+        self._voice_mode = True  # active la réponse vocale pour ce cycle
+
+        def on_result(text: str):
+            self.entry.delete("1.0", tk.END)
+            self.entry.insert("1.0", text)
+            self._send()
+
+        VoiceWindow(self.root, on_result)
+
+    def _attach_file(self):
+        """Ouvre un sélecteur de fichier et insère le chemin dans le champ de saisie."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Joindre un fichier",
+            filetypes=[
+                ("Tous les fichiers", "*.*"),
+                ("Documents", "*.pdf *.docx *.txt *.doc"),
+                ("Images", "*.png *.jpg *.jpeg *.gif *.bmp *.webp"),
+                ("Code", "*.py *.js *.html *.css *.json *.xml *.csv"),
+                ("Excel", "*.xlsx *.xls"),
+            ]
+        )
+        if path:
+            current = self.entry.get("1.0", tk.END).strip()
+            self.entry.delete("1.0", tk.END)
+            prefix = current + "\n" if current else ""
+            self.entry.insert("1.0", f'{prefix}"{path}"')
+            self.entry.focus()
+            self._resize_entry()
 
     # ── Envoi et traitement ──────────────────────────────────────────────────
 
@@ -334,21 +667,58 @@ class AmahGUI:
 
     def _show_reply(self, reply):
         self._last_reply = reply
-        # Supprime uniquement le "réfléchit..." — pas les outils déjà affichés
         self.chat.config(state=tk.NORMAL)
         self.chat.delete("thinking_start", tk.END)
         self.chat.config(state=tk.DISABLED)
-        # Affiche les outils utilisés pendant cet appel
         if self._tools_this_call:
             outils = " → ".join(self._tools_this_call)
             self._write((f"  [ {outils} ]\n", "tool"))
         self._tools_this_call = []
-        self._write((f"[{self._ts()}] ", "timestamp"),
-                    ("Amah > ", "amah_lbl"),
-                    (reply + "\n\n", "amah_txt"))
+        self._write((f"[{self._ts()}] ", "timestamp"), ("Amah > ", "amah_lbl"))
+        self._typewrite(reply + "\n\n", "amah_txt", callback=self._after_reply)
+
+    def _typewrite(self, text: str, tag: str, callback=None):
+        """Affiche le texte progressivement (effet machine a ecrire, ~1.2 sec total)."""
+        tick_ms = 20
+        n_ticks = 60
+        chunk   = max(1, len(text) // n_ticks)
+        idx     = [0]
+
+        def _tick():
+            if idx[0] < len(text):
+                end = min(idx[0] + chunk, len(text))
+                self.chat.config(state=tk.NORMAL)
+                self.chat.insert(tk.END, text[idx[0]:end], tag)
+                self.chat.see(tk.END)
+                self.chat.config(state=tk.DISABLED)
+                idx[0] = end
+                self.root.after(tick_ms, _tick)
+            elif callback:
+                callback()
+
+        _tick()
+
+    def _after_reply(self):
         self._write_separator()
         self._unlock()
-        self._set_status("Pret")
+        self._set_status("[OK] Pret")
+        # Si la question venait du micro, Amah répond aussi à voix haute
+        if self._voice_mode and self._last_reply:
+            self._voice_mode = False
+            threading.Thread(
+                target=self._speak_reply,
+                args=(self._last_reply,),
+                daemon=True
+            ).start()
+
+    def _speak_reply(self, text: str):
+        """Fait parler Amah après une interaction vocale (200 premiers chars)."""
+        try:
+            from tools.voice import speak
+            short = text[:220].replace("\n", " ")
+            speak(short, speed=1)
+        except Exception:
+            pass
 
     def _show_error(self, error):
         self.chat.config(state=tk.NORMAL)
@@ -356,7 +726,7 @@ class AmahGUI:
         self.chat.config(state=tk.DISABLED)
         self._write((f"  Erreur : {error}\n\n", "error"))
         self._unlock()
-        self._set_status("Erreur")
+        self._set_status("[!] Erreur")
 
     def _unlock(self):
         self.busy = False
@@ -365,6 +735,25 @@ class AmahGUI:
         self.entry.focus()
 
     # ── Actions ──────────────────────────────────────────────────────────────
+
+    def _launch_voice_ui(self):
+        """Lance l'interface vocale plein écran dans un processus séparé."""
+        import subprocess as _sp
+        voice_script = str(Path(__file__).parent / "voice_fullscreen.py")
+        _sp.Popen([sys.executable, voice_script],
+                  creationflags=_sp.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+        self._set_status("Interface vocale lancee — dis 'ferme' pour quitter")
+
+    def _launch_listener(self):
+        """Lance le listener de mot de réveil (widget coin bas-droit)."""
+        import subprocess as _sp
+        listener_script = str(Path(__file__).parent / "amah_listener.py")
+        if not Path(listener_script).exists():
+            messagebox.showerror("Erreur", "amah_listener.py introuvable")
+            return
+        _sp.Popen([sys.executable, listener_script],
+                  creationflags=_sp.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+        self._set_status("Amah ecoute en arriere-plan — dis 'Amah' pour l'appeler")
 
     def _reset(self):
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -401,17 +790,25 @@ class AmahGUI:
 
     def _show_tools(self):
         cats = {
-            "Fichiers":   ["list_files", "organize_folder", "find_files", "move_file",
-                           "create_folder", "read_file", "get_folder_info"],
-            "Documents":  ["create_word", "create_txt", "create_pdf", "read_document"],
-            "Internet":   ["web_search", "read_webpage"],
-            "Systeme":    ["get_system_info", "open_file", "run_command"],
-            "Memoire":    ["save_memory", "get_memories", "delete_memory"],
-            "Email":      ["read_emails", "send_email", "search_emails"],
-            "Navigateur": ["open_browser", "click_element", "fill_form",
-                           "take_screenshot", "get_page_text"],
+            "Fichiers":    ["list_files","organize_folder","find_files","move_file",
+                            "create_folder","read_file","write_file","edit_file",
+                            "edit_pdf","delete_file","get_folder_info","summarize"],
+            "Documents":   ["create_word","create_txt","create_pdf","read_document"],
+            "Internet":    ["web_search","read_webpage","open_browser","click_element",
+                            "fill_form","take_screenshot","get_page_text"],
+            "Email":       ["read_emails","send_email","search_emails","draft_email"],
+            "Systeme":     ["get_system_info","open_file","run_command",
+                            "list_processes","get_network_info","kill_process"],
+            "Memoire":     ["save_memory","get_memories","delete_memory"],
+            "Code":        ["write_code","run_code","explain_code"],
+            "Hardware":    ["set_volume","get_audio_level","mute_audio",
+                            "set_brightness","get_brightness","wifi_toggle"],
+            "Vision":      ["analyze_screen","screenshot_full"],
+            "YouTube":     ["open_youtube","search_youtube","play_music"],
+            "Vols":        ["search_flights"],
+            "Planif":      ["create_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n", "dim"))
+        self._write(("\n  — 87 outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -491,7 +888,7 @@ class AmahGUI:
         "send":"email","gmail":"email","message":"email","reponse":"email","repond":"email",
         "expediteur":"email","sujet":"email","piece":"email","jointe":"email",
         "inbox":"email","reception":"email","nouveau":"email","nouveaux":"email",
-        "recus":"email","recu":"email","non-lu":"email","nonlu":"email",
+        "non-lu":"email","nonlu":"email",
         "messagerie":"email","courrier":"email","courriel":"email",
         # mémoire
         "memorise":"memoire","souviens":"memoire","rappelle":"memoire","memoire":"memoire",
@@ -527,31 +924,87 @@ class AmahGUI:
         "traduis":"info","traduire":"info","traduction":"info","langue":"info",
         "translate":"info","stats":"info","statistiques":"info","version":"info",
         "licence":"info","mise-a-jour":"info","update":"info","pluie":"info","soleil":"info",
-        # planificateur
+        # planificateur taches
         "planifie":"planif","planifier":"planif","tache":"planif","taches":"planif",
         "planificateur":"planif","cron":"planif","automatique":"planif","chaque":"planif",
         "quotidien":"planif","hebdo":"planif","programme":"planif",
+        # hardware / parametres systeme (v1.4)
+        "volume":"hardware","son":"hardware","audio":"hardware","muet":"hardware",
+        "silence":"hardware","sourd":"hardware","bascule":"hardware",
+        "lumiere":"hardware","luminosite":"hardware","lumineux":"hardware",
+        "sombre":"hardware","clarte":"hardware","eclairer":"hardware","assombrir":"hardware",
+        "wifi":"hardware","wi-fi":"hardware","sans-fil":"hardware","wlan":"hardware",
+        "bluetooth":"hardware","reseau-wifi":"hardware",
+        # vision ecran (v1.4)
+        "vois-ecran":"vision","regarde-ecran":"vision","observe":"vision",
+        "analyse-mon-ecran":"vision","que-vois-tu":"vision","vision":"vision",
+        "vois-tu":"vision","regardes":"vision","captur":"vision",
+        # youtube (v1.4)
+        "youtube":"youtube","yt":"youtube","video":"youtube","videos":"youtube",
+        "musique":"youtube","chanson":"youtube","chansons":"youtube",
+        "film":"youtube","films":"youtube","serie":"youtube","clip":"youtube",
+        # vols / voyages (v1.4)
+        "vol":"flights","vols":"flights","avion":"flights","avions":"flights",
+        "billet":"flights","aeroport":"flights","voyage":"flights","voyager":"flights",
+        "depart":"flights","arrivee":"flights","aller":"flights","retour":"flights",
+        "skyscanner":"flights","kayak":"flights","booking":"flights",
+        # planification multi-etapes (v1.4)
+        "plan":"planner","etapes":"planner","etape-par-etape":"planner",
+        "objectif-complexe":"planner","fais-tout":"planner","execute-plan":"planner",
+        "multi-etapes":"planner","sequence":"planner",
+        # suppression fichier (v1.5)
+        "supprime":"fichiers","supprimer":"fichiers","efface":"fichiers","effacer":"fichiers",
+        "vide":"fichiers","retire":"fichiers","enleve":"fichiers","enlever":"fichiers",
+        # résumé / analyse document (v1.5)
+        "resume":"documents","resumer":"documents","resumé":"documents","synthese":"documents",
+        "analyse":"documents","analyser":"documents","lis":"documents","explique-moi":"documents",
+        # brouillon email (v1.5)
+        "brouillon":"email","redige-email":"email","prépare-email":"email","draft":"email",
+        # processus / kill (v1.5)
+        "ferme":"systeme","tuer":"systeme","stoppe":"systeme","stopper":"systeme",
+        "termine":"systeme","terminer":"systeme","quitte":"systeme","coupe":"systeme",
+        "fige":"systeme","plante":"systeme","bloque":"systeme",
+        # code (v1.5)
+        "code":"code","coder":"code","programme":"code","programmer":"code",
+        "script":"code","executer":"code","exécute":"code","exécuter":"code",
+        "lancer-script":"code","lance-script":"code","python":"code","javascript":"code",
+        "node":"code","debug":"code","debugue":"code","explique-code":"code",
+        # musique (v1.5)
+        "musique":"youtube","chanson":"youtube","chansons":"youtube","joue":"youtube",
+        "jouer":"youtube","mets":"youtube","ecouter":"youtube","écoute":"youtube",
+        "music":"youtube","song":"youtube","play":"youtube",
     }
 
     # Catégories → noms d'outils inclus
     _CAT_TOOLS = {
-        "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","get_folder_info"},
-        "documents": {"create_word","create_txt","create_pdf","read_document"},
+        "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
+        "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf","summarize"},
         "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text"},
-        "email":     {"read_emails","send_email","search_emails"},
+        "email":     {"read_emails","send_email","search_emails","draft_email"},
         "memoire":   {"save_memory","get_memories","delete_memory"},
-        "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info"},
+        "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},
+        "code":      {"write_code","run_code","explain_code","read_file","write_file","edit_file"},
         "utils":     {"calculate","get_datetime","add_days","generate_password","convert_units","zip_files","unzip_file","list_archive","create_qrcode"},
         "data":      {"read_excel","create_excel","append_to_excel","read_clipboard","write_clipboard"},
         "media":     {"speak","listen","listen_continuous","send_notification","set_reminder","screenshot_full"},
         "images":    {"resize_image","get_image_info","convert_image"},
         "info":      {"get_weather","get_weather_simple","translate","detect_language","get_stats","check_update","get_current_version","get_license_info"},
         "planif":    {"create_daily_task","list_tasks","delete_task","run_task_now"},
+        # Nouveaux (v1.4)
+        "hardware":  {"set_volume","get_audio_level","mute_audio","set_brightness","get_brightness","wifi_toggle"},
+        "vision":    {"analyze_screen","screenshot_full"},
+        "youtube":   {"open_youtube","search_youtube","play_music","open_browser","web_search"},
+        "flights":   {"search_flights","web_search","open_browser"},
+        "planner":   {"create_plan"},
     }
 
     def _select_tools(self, message: str):
         """Retourne la sous-liste TOOLS_DEFINITIONS pertinente, ou None si pas d'outil."""
-        words = message.lower().replace("'", " ").split()
+        import unicodedata
+        # Supprime les accents pour que "météo" matche "meteo", "crée" → "cree", etc.
+        nfd = unicodedata.normalize("NFD", message.lower().replace("'", " "))
+        clean = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+        words = clean.split()
         cats = set()
         for w in words:
             cat = self._WORD_TO_CAT.get(w)
@@ -653,10 +1106,11 @@ class AmahGUI:
             active_model = MODEL
             DEFAULT_TOOLS = {
                 "web_search","read_webpage","list_files","read_file",
-                "open_file","run_command",          # ouvrir/lancer des fichiers
-                "create_word","get_datetime","calculate",
-                "save_memory","get_memories","read_emails",
-                "send_email","get_system_info","speak",
+                "open_file","run_command","create_word","get_datetime","calculate",
+                "save_memory","get_memories","read_emails","send_email",
+                "get_system_info","speak",
+                "get_weather","get_weather_simple",   # météo souvent demandée
+                "translate","open_youtube","play_music",  # traduction / musique
             }
             tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in DEFAULT_TOOLS]
             self.root.after(0, self._set_status, "Amah reflechit...")
@@ -730,7 +1184,7 @@ class SetupWindow:
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
         tk.Label(hdr, text="Configure tes acces pour demarrer",
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
-        tk.Label(hdr, text="v1.3.0  ·  65 outils  ·  Windows 11",
+        tk.Label(hdr, text="v1.5.0  ·  87 outils  ·  Windows 11",
                  bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 

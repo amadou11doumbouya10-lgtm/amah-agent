@@ -103,6 +103,49 @@ def run_command(command: str) -> dict:
         return {"error": str(e)}
 
 
+_BLOCKED_PROCS = {
+    "lsass.exe","csrss.exe","winlogon.exe","smss.exe","wininit.exe",
+    "services.exe","svchost.exe","system","registry","explorer.exe",
+}
+
+def kill_process(name: str = "", pid: int = 0) -> dict:
+    """Termine un processus Windows par nom ou PID. Bloque les processus système critiques."""
+    try:
+        import psutil
+    except ImportError:
+        return {"error": "psutil manquant. Lance : pip install psutil"}
+
+    if not name and not pid:
+        return {"error": "Fournis un nom ou un PID."}
+
+    killed = []
+    not_found = True
+
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            proc_name = proc.info["name"] or ""
+            proc_pid  = proc.info["pid"]
+
+            match = (pid and proc_pid == pid) or (name and name.lower() in proc_name.lower())
+            if not match:
+                continue
+
+            not_found = False
+            if proc_name.lower() in _BLOCKED_PROCS:
+                return {"error": f"Impossible de terminer '{proc_name}' — processus système protégé."}
+
+            proc.terminate()
+            killed.append(f"{proc_name} (PID {proc_pid})")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        except Exception:
+            pass
+
+    if not_found:
+        return {"error": f"Aucun processus '{name or pid}' trouvé."}
+    return {"success": True, "termines": killed}
+
+
 def _fmt(size: int) -> str:
     for unit in ["o", "Ko", "Mo", "Go"]:
         if size < 1024:

@@ -3,6 +3,12 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
+try:
+    import fitz  # PyMuPDF — pour edit_pdf
+    _FITZ_OK = True
+except ImportError:
+    _FITZ_OK = False
+
 CATEGORIES = {
     "Images":        [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tiff", ".raw"],
     "Vidéos":        [".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".3gp"],
@@ -177,6 +183,50 @@ def write_file(path: str, content: str) -> dict:
         return {"error": str(e)}
 
 
+def edit_pdf(path: str, old_text: str, new_text: str) -> dict:
+    """Modifie du texte dans un PDF existant en gardant la mise en page."""
+    if not _FITZ_OK:
+        return {"error": "PyMuPDF non installé. Lance : pip install pymupdf"}
+
+    p = Path(path).expanduser()
+    if not p.exists():
+        return {"error": f"Fichier introuvable : {path}"}
+    if p.suffix.lower() != ".pdf":
+        return {"error": "edit_pdf fonctionne uniquement sur les fichiers .pdf"}
+
+    try:
+        doc        = fitz.open(str(p))
+        total      = 0
+        for page in doc:
+            instances = page.search_for(old_text)
+            total += len(instances)
+            for rect in instances:
+                # Efface l'ancien texte avec un rectangle blanc
+                page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))
+                # Récupère la taille de police approximative depuis la hauteur du rect
+                fontsize = round(rect.height * 0.85)
+                page.insert_text(
+                    (rect.x0, rect.y1 - 1),
+                    new_text,
+                    fontsize=max(fontsize, 8),
+                    color=(0, 0, 0),
+                )
+        if total == 0:
+            doc.close()
+            return {"error": f"Texte '{old_text}' introuvable dans le PDF. Vérifiez la casse."}
+        doc.save(str(p), incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+        doc.close()
+        return {
+            "success":      True,
+            "fichier":      p.name,
+            "remplacements": total,
+            "ancien":       old_text,
+            "nouveau":      new_text,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def edit_file(path: str, old_text: str, new_text: str) -> dict:
     """Remplace une portion de texte dans un fichier existant."""
     p = Path(path).expanduser()
@@ -195,6 +245,54 @@ def edit_file(path: str, old_text: str, new_text: str) -> dict:
             "remplacements": 1,
             "occurrences_restantes": count - 1,
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def delete_file(path: str) -> dict:
+    """Supprime définitivement un fichier ou un dossier vide."""
+    p = Path(path).expanduser()
+    if not p.exists():
+        return {"error": f"Introuvable : {path}"}
+    try:
+        if p.is_dir():
+            shutil.rmtree(str(p))
+            return {"success": True, "supprime": str(p), "type": "dossier"}
+        else:
+            p.unlink()
+            return {"success": True, "supprime": str(p), "type": "fichier"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def summarize(path: str) -> dict:
+    """Lit un document (txt, pdf, docx, md, py, js…) pour que l'IA en fasse un résumé."""
+    p = Path(path).expanduser()
+    if not p.exists():
+        return {"error": f"Fichier introuvable : {path}"}
+    ext = p.suffix.lower()
+    try:
+        if ext == ".pdf":
+            if _FITZ_OK:
+                doc  = fitz.open(str(p))
+                text = "\n".join(page.get_text() for page in doc)
+                doc.close()
+            else:
+                return {"error": "PyMuPDF manquant pour lire les PDF. Lance : pip install pymupdf"}
+        elif ext in (".docx",):
+            try:
+                import docx as _docx
+                d    = _docx.Document(str(p))
+                text = "\n".join(para.text for para in d.paragraphs)
+            except ImportError:
+                return {"error": "python-docx manquant. Lance : pip install python-docx"}
+        else:
+            text = p.read_text(encoding="utf-8", errors="replace")
+
+        if len(text) > 6000:
+            text = text[:6000] + "\n\n[... tronqué à 6000 caractères pour le résumé ...]"
+        return {"success": True, "fichier": p.name, "contenu": text,
+                "instruction": "Fais un résumé clair et structuré de ce contenu."}
     except Exception as e:
         return {"error": str(e)}
 

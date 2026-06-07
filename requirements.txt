@@ -5,6 +5,7 @@ ddgs
 python-docx
 fpdf2
 pypdf
+pymupdf
 psutil
 playwright
 pillow
@@ -15,3 +16,8 @@ deep-translator
 qrcode[pil]
 SpeechRecognition
 pyaudio
+pynput
+PyQt6
+PyQt6-Qt6
+PyQt6-sip
+sounddevice

@@ -1,5 +1,5 @@
 # Guide d'installation — Amah Agent
-*Version 1.0 — Mai 2026*
+*Version 1.4.1 — Juin 2026*
 
 ---
 
@@ -7,13 +7,14 @@
 
 - Un PC Windows 10 ou Windows 11
 - Une connexion internet
+- Un microphone (optionnel, pour l'interface vocale)
 - 5 minutes
 
 ---
 
 ## Étape 1 — Télécharger Amah Agent
 
-Téléchargez le fichier `Amah Agent.exe` fourni par votre prestataire.
+Téléchargez le fichier `Amah Agent.exe` fourni par votre prestataire.  
 Placez-le dans un dossier de votre choix, par exemple :
 
 ```
@@ -35,8 +36,8 @@ Amah utilise Groq pour son intelligence artificielle. C'est entièrement gratuit
 4. Cliquez sur **"Create API Key"**
 5. Donnez-lui un nom (ex: `Amah`) et copiez la clé générée
 
-> La clé ressemble à : `gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-> Conservez-la, vous en aurez besoin à l'étape suivante.
+> La clé ressemble à : `gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`  
+> **Conseil :** Créez jusqu'à 3 comptes gratuits pour tripler votre quota quotidien.
 
 ---
 
@@ -47,27 +48,34 @@ Double-cliquez sur `Amah Agent.exe`.
 Un écran de configuration s'ouvre automatiquement :
 
 ```
-┌─────────────────────────────────────────┐
-│   THE AMAH — PREMIER LANCEMENT         │
-│   Configure tes accès pour démarrer    │
-├─────────────────────────────────────────┤
-│                                         │
-│  Clé API Groq (obligatoire)             │
-│  [___________________________________]  │
-│                                         │
-│  Adresse Gmail (optionnel)              │
-│  [___________________________________]  │
-│                                         │
-│  Mot de passe Gmail (optionnel)         │
-│  [___________________________________]  │
-│                                         │
-│           [ Démarrer Amah ]             │
-└─────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│   THE AMAH — PREMIER LANCEMENT  v1.4.1    │
+│   Configure tes accès pour démarrer       │
+├────────────────────────────────────────────┤
+│                                            │
+│  Clé Groq n1 (obligatoire)                │
+│  [______________________________________]  │
+│                                            │
+│  Clé Groq n2 (optionnel — +quota)         │
+│  [______________________________________]  │
+│                                            │
+│  Clé Groq n3 (optionnel — +quota)         │
+│  [______________________________________]  │
+│                                            │
+│  Clé de licence (obligatoire)             │
+│  [______________________________________]  │
+│                                            │
+│  Adresse Gmail (optionnel)                │
+│  [______________________________________]  │
+│                                            │
+│           [ Démarrer Amah ]               │
+└────────────────────────────────────────────┘
 ```
 
 1. **Collez votre clé Groq** dans le premier champ
-2. Les champs Gmail sont optionnels (voir Étape 4 si vous voulez les emails)
-3. Cliquez **"Démarrer Amah"**
+2. **Entrez votre clé de licence** (fournie par contact.amah.officiel@gmail.com)
+3. Les champs Gmail sont optionnels (voir Étape 4)
+4. Cliquez **"Démarrer Amah"**
 
 Amah démarre. La configuration est sauvegardée — vous n'aurez plus à la refaire.
 
@@ -75,15 +83,12 @@ Amah démarre. La configuration est sauvegardée — vous n'aurez plus à la ref
 
 ## Étape 4 — Configurer les emails Gmail (optionnel)
 
-Si vous souhaitez qu'Amah puisse lire et envoyer des emails depuis votre Gmail :
-
 ### 4a — Activer la validation en 2 étapes
 1. Allez sur **myaccount.google.com**
 2. Sécurité → **Validation en 2 étapes** → Activez-la
 
 ### 4b — Créer un mot de passe d'application
 1. Toujours dans Sécurité → **Mots de passe des applications**
-   *(ou allez directement sur myaccount.google.com/apppasswords)*
 2. Tapez `Amah` dans le champ et cliquez **Créer**
 3. Copiez le code à 16 caractères affiché
 
@@ -92,23 +97,26 @@ Si vous souhaitez qu'Amah puisse lire et envoyer des emails depuis votre Gmail :
 2. Onglet **"Transfert et POP/IMAP"**
 3. Activez **"Activer IMAP"** → Enregistrer
 
-### 4d — Renseigner dans Amah
-Au premier lancement (Étape 3), remplissez :
-- **Adresse Gmail** : votre.adresse@gmail.com
-- **Mot de passe d'application** : le code à 16 caractères
-
 ---
 
 ## Utilisation quotidienne
 
 Double-cliquez sur `Amah Agent.exe` pour lancer Amah.
 
-Exemples de commandes :
+### Exemples de commandes (texte)
 - *"Lis mes 5 derniers emails"*
-- *"Crée un document Word avec le résumé de notre réunion"*
+- *"Crée un document Word sur notre réunion"*
 - *"Cherche les dernières nouvelles sur l'IA"*
-- *"Montre-moi les fichiers de mon bureau"*
-- *"Quelle est la taille de mon disque dur ?"*
+- *"Règle le volume à 70%"*
+- *"Lance une vidéo YouTube sur la guitare"*
+- *"Cherche un vol Paris → New York pour le 15 juillet"*
+- *"Qu'est-ce que tu vois sur mon écran ?"*
+
+### Interface vocale
+Cliquez sur le bouton **[◎]** dans la barre de saisie :
+- Une fenêtre animée s'ouvre (style HUD)
+- Parlez naturellement (8 secondes max)
+- Amah transcrit, répond et parle à voix haute
 
 ---
 
@@ -119,6 +127,8 @@ Exemples de commandes :
 | Windows bloque le .exe | Clic droit → "Exécuter quand même" |
 | "Clé Groq invalide" | Vérifiez que vous avez bien copié toute la clé |
 | "Erreur Gmail" | Vérifiez que IMAP est activé dans Gmail |
+| Micro non détecté | Vérifiez que votre micro est branché et activé dans Windows |
+| Volume/luminosité ne change pas | Normal sur certains écrans externes (WMI non supporté) |
 | L'écran de config réapparaît | Le fichier .env a été supprimé, reconfigurez |
 
 ---

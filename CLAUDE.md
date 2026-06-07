@@ -1,10 +1,10 @@
 # Amah Agent Local
 
 ## Présentation
-Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit). 65 outils réels.
+Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit). 79 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
-Version actuelle : **v1.3.0**
+Version actuelle : **v1.4.1**
 
 ## Structure
 ```
@@ -233,7 +233,7 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
 - Profil : github.com/amadou11doumbouya10-lgtm
 - Portfolio : amadou11doumbouya10-lgtm.github.io/-theamah-streaming/portfolio.html
 
-## Etat — v1.3.0 (04/06/2026)
+## Etat — v1.4.0 (05/06/2026)
 - [x] Routage modèle : 8B (questions simples) / 70B (tool use)
 - [x] Logo hexagone officiel (SVG + PNG 680px + ICO recadré)
 - [x] Email : tri par date UTC réelle + priorité emails personnels
@@ -241,14 +241,34 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
 - [x] Tokens -75% : routeur 90+ mots-clés + descriptions compactes
 - [x] 3 clés Groq en rotation automatique (200 appels/jour)
 - [x] SetupWindow : 3 clés Groq + licence + Gmail en un écran
-- [x] Version v1.3.0 sur tous les écrans (config, licence, header)
-- [x] README profil GitHub + Portfolio mis à jour
+- [x] Version v1.4.0 sur tous les écrans (config, licence, header)
+- [x] **11 nouveaux outils** inspirés de Mark XXXIX :
+  - Hardware : set_volume / mute_audio / set_brightness / get_brightness / wifi_toggle / get_audio_level
+  - Vision IA : analyze_screen (Groq llama-3.2-vision)
+  - YouTube : open_youtube / search_youtube
+  - Vols : search_flights (DuckDuckGo + Google Flights)
+  - Planificateur : create_plan (JSON multi-étapes, 70B)
+- [x] GUI v1.4 : monitoring CPU/RAM temps réel, machine à écrire, bouton [+] pièce jointe
+- [x] Règle mono-appel dans le system prompt
+- [x] Routeur étendu : hardware / vision / youtube / flights / planner
+- [x] Interface vocale plein écran JARVIS (voice_fullscreen.py) — HUD cyan, hexagone rotatif, radar, barres audio
+- [x] **Mot de réveil "Amah"** (amah_listener.py) — widget coin bas-droit, détection SpeechRecognition, lance plein écran automatiquement
+- [x] Bouton "⬡ Amah écoute" dans l'en-tête gui.py
+- [x] 79 outils documentés dans docs/CAPACITES_AMAH.md
+- [x] edit_pdf (PyMuPDF) — modification PDF en gardant la mise en page
+- [x] Sécurité licence : fail-closed + secret dans .env
+- [x] Fix write_file routing (plus d'erreur "not in request.tools")
+- [x] amah.spec mis à jour : 5 nouveaux modules v1.4 + pymupdf
+
+## Etat — v1.4.1 (07/06/2026)
+- [x] Fix routage outils : normalisation des accents (météo/traduction → get_weather_simple)
+- [x] Sécurité tool routing renforcée
+- [x] Kit_Client_Amah recompilé avec gui.py (interface stable)
 
 ## Prochaines améliorations possibles
-- [ ] Activer vérification licence sur ventes (remplacer fail-open par fail-closed)
 - [ ] Licence entreprise volume (une clé pour N postes)
 - [ ] Google Calendar (agenda)
-- [ ] Mode mains libres (listen + speak en boucle)
 - [ ] Streaming réponse Groq dans tkinter
 - [ ] Dashboard journalier automatique
 - [ ] Connexion Telegram bot
+- [ ] Wake word hors ligne (Porcupine / openWakeWord) pour ne pas dépendre de Google Speech API

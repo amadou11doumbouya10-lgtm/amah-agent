@@ -14,12 +14,12 @@ def listen(timeout: int = 5, language: str = "fr-FR") -> dict:
         import speech_recognition as sr
 
         recognizer = sr.Recognizer()
-        recognizer.pause_threshold = 1.0
+        recognizer.pause_threshold = 0.7
         recognizer.energy_threshold = 300
 
         with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=15)
+            recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=8)
 
         text = recognizer.recognize_google(audio, language=language)
         return {"success": True, "texte": text, "langue": language}

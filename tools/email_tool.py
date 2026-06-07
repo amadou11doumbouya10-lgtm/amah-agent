@@ -199,3 +199,17 @@ def search_emails(query: str) -> dict:
                 conn.logout()
         except Exception:
             pass
+
+
+def draft_email(to: str, subject: str, body: str) -> dict:
+    """Prépare un brouillon d'email sans l'envoyer. Présente le contenu à l'utilisateur pour validation."""
+    if not to or not subject or not body:
+        return {"error": "Destinataire, sujet et corps sont requis pour le brouillon."}
+    return {
+        "success":      True,
+        "brouillon":    True,
+        "destinataire": to,
+        "sujet":        subject,
+        "corps":        body,
+        "message":      f"Brouillon prêt pour {to}. Dis 'envoie' pour confirmer ou 'annule' pour abandonner.",
+    }

@@ -1,9 +1,9 @@
-from tools.files            import list_files, organize_folder, find_files, move_file, create_folder, read_file, write_file, edit_file, get_folder_info
+from tools.files            import list_files, organize_folder, find_files, move_file, create_folder, read_file, write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
 from tools.documents   import create_word, create_txt, create_pdf, read_document
 from tools.search      import web_search, read_webpage
-from tools.system      import get_system_info, open_file, run_command
+from tools.system      import get_system_info, open_file, run_command, kill_process
 from tools.memory      import save_memory, get_memories, delete_memory, save_message, load_recent_messages
-from tools.email_tool  import read_emails, send_email, search_emails
+from tools.email_tool  import read_emails, send_email, search_emails, draft_email
 from tools.browser     import open_browser, click_element, fill_form, take_screenshot, get_page_text
 from tools.voice       import speak
 from tools.notifications import send_notification, set_reminder
@@ -20,6 +20,12 @@ from tools.scheduler         import create_daily_task, list_tasks, delete_task, 
 from tools.stats             import get_stats, reset_stats
 from tools.updater           import check_update, get_current_version
 from tools.license           import get_license_info
+from tools.computer_settings import set_volume, get_audio_level, mute_audio, set_brightness, get_brightness, wifi_toggle
+from tools.screen_vision     import analyze_screen
+from tools.youtube_tool      import open_youtube, search_youtube, play_music
+from tools.code_tools        import write_code, run_code, explain_code
+from tools.flight_finder     import search_flights
+from tools.planner           import create_plan
 
 TOOL_FUNCTIONS = {
     "list_files":        list_files,
@@ -30,6 +36,7 @@ TOOL_FUNCTIONS = {
     "read_file":         read_file,
     "write_file":        write_file,
     "edit_file":         edit_file,
+    "edit_pdf":          edit_pdf,
     "get_folder_info":   get_folder_info,
     "create_word":       create_word,
     "create_txt":        create_txt,
@@ -89,4 +96,25 @@ TOOL_FUNCTIONS = {
     "check_update":        check_update,
     "get_current_version": get_current_version,
     "get_license_info":    get_license_info,
+    # Nouveaux outils v1.4
+    "set_volume":          set_volume,
+    "get_audio_level":     get_audio_level,
+    "mute_audio":          mute_audio,
+    "set_brightness":      set_brightness,
+    "get_brightness":      get_brightness,
+    "wifi_toggle":         wifi_toggle,
+    "analyze_screen":      analyze_screen,
+    "open_youtube":        open_youtube,
+    "search_youtube":      search_youtube,
+    "play_music":          play_music,
+    "search_flights":      search_flights,
+    "create_plan":         create_plan,
+    # Nouveaux outils v1.5
+    "delete_file":         delete_file,
+    "summarize":           summarize,
+    "draft_email":         draft_email,
+    "kill_process":        kill_process,
+    "write_code":          write_code,
+    "run_code":            run_code,
+    "explain_code":        explain_code,
 }
