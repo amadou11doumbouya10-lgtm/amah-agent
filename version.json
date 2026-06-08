@@ -1,5 +1,5 @@
 {
-  "version": "1.4.1",
-  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.4.1/Amah-Agent.exe",
-  "notes": "v1.4.1 : correction routage outils (normalisation accents meteo/traduction), securite tool routing renforcee"
+  "version": "1.4.2",
+  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.4.2/Amah-Agent.exe",
+  "notes": "v1.4.2 : streaming des reponses simples, GroqClient centralise (rotation de cles partagee), fix placeholder chat qui restait affiche, fix modele vision decommissionne, voix synchrone avec vraies erreurs"
 }

@@ -9,6 +9,7 @@ from tkinter import scrolledtext, messagebox
 from datetime import datetime
 from pathlib import Path
 from groq import Groq
+from groq_client import GroqClient
 from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
@@ -109,20 +110,14 @@ class AmahGUI:
         self.root.geometry("980x700")
         self.root.minsize(760, 520)
 
-        # Rotation de clés API — charge toutes les clés disponibles
-        self._api_keys = [k for k in [
-            os.getenv("GROQ_API_KEY"),
-            os.getenv("GROQ_API_KEY_2"),
-            os.getenv("GROQ_API_KEY_3"),
-        ] if k and not k.startswith("AJOUTER")]
-
-        if not self._api_keys:
-            messagebox.showerror("Cle manquante",
-                "GROQ_API_KEY introuvable dans le fichier .env")
+        # Client Groq partage (singleton) — rotation de cles + backoff geres
+        # de maniere centrale, utilises aussi par planner.py et screen_vision.py
+        try:
+            self.groq = GroqClient.get()
+        except RuntimeError as e:
+            messagebox.showerror("Cle manquante", str(e))
             sys.exit(1)
 
-        self._key_index = 0
-        self.client     = Groq(api_key=self._api_keys[0])
         self.session_id     = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.busy           = False
         self._last_reply    = ""
@@ -624,7 +619,11 @@ class AmahGUI:
         save_message(self.session_id, "user", text)
 
         self.chat.config(state=tk.NORMAL)
-        self.chat.mark_set("thinking_start", tk.END)
+        # "end-1c" (juste avant le retour à la ligne final implicite du widget,
+        # là où insert(END, ...) écrit réellement) et non tk.END : sinon la
+        # marque finit après le texte inséré et delete(mark, END) ne supprime
+        # jamais le placeholder "réfléchit..." (il restait affiché à chaque tour).
+        self.chat.mark_set("thinking_start", "end-1c")
         self.chat.mark_gravity("thinking_start", tk.LEFT)
         self.chat.config(state=tk.DISABLED)
         self._write((f"[{self._ts()}] ", "timestamp"),
@@ -639,13 +638,85 @@ class AmahGUI:
         threading.Thread(target=self._run_chat, daemon=True).start()
 
     def _run_chat(self):
+        last_user = next(
+            (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
+        )
+        tools  = self._select_tools(last_user)
+        stream = self._is_simple_query(last_user, tools)
         try:
-            reply = self._chat()
+            if stream:
+                reply, started = self._chat_stream()
+                finish = self._finish_streamed_reply if started else self._show_reply
+            else:
+                reply  = self._chat(last_user, tools)
+                finish = self._show_reply
             self.messages.append({"role": "assistant", "content": reply})
             save_message(self.session_id, "assistant", reply)
-            self.root.after(0, self._show_reply, reply)
+            self.root.after(0, finish, reply)
         except Exception as e:
             self.root.after(0, self._show_error, self._format_error(str(e)))
+
+    def _is_simple_query(self, text: str, tools) -> bool:
+        """Question courte et purement conversationnelle (salutation, accuse de
+        reception...) -> reponse rapide par le 8B sans outils, eligible au
+        streaming. On retire volontairement qui/quand/combien/pourquoi/comment/
+        c'est quoi : ces mots servent autant a des phrases sociales qu'a de
+        vraies questions factuelles, qui doivent passer par le 70B + web_search
+        (REGLE FACTUELLE du system prompt) pour eviter les reponses inventees."""
+        SIMPLE_PATTERNS = {
+            "bonjour","bonsoir","salut","hello","hi","merci","ok","oui","non",
+            "dis","repete","aide","help","test","essai",
+        }
+        words_lower = set(text.lower().replace("'", " ").split())
+        return (len(text.split()) <= 6 and
+                bool(words_lower & SIMPLE_PATTERNS) and
+                not tools)
+
+    def _chat_stream(self):
+        """Reponse en streaming pour les questions simples/conversationnelles
+        (8B, sans outils) : le texte apparait au fur et a mesure plutot que
+        d'attendre la reponse complete avant l'effet machine a ecrire — la
+        latence percue est nettement reduite. Retourne (texte, a_diffuse)."""
+        self._trim_messages()
+        self.root.after(0, self._set_status, "Amah reflechit...")
+
+        full    = []
+        started = [False]
+        try:
+            stream = self.groq.chat(
+                self.messages, model="llama-3.1-8b-instant",
+                max_tokens=1024, temperature=0.4, stream=True,
+                on_status=lambda txt: self.root.after(0, self._set_status, txt),
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    if not started[0]:
+                        started[0] = True
+                        self.root.after(0, self._start_stream_ui)
+                    full.append(delta)
+                    self.root.after(0, self._append_stream_chunk, delta)
+        except Exception:
+            if not full:
+                raise
+        return "".join(full) or "...", started[0]
+
+    def _start_stream_ui(self):
+        self.chat.config(state=tk.NORMAL)
+        self.chat.delete("thinking_start", tk.END)
+        self.chat.config(state=tk.DISABLED)
+        self._write((f"[{self._ts()}] ", "timestamp"), ("Amah > ", "amah_lbl"))
+
+    def _append_stream_chunk(self, text: str):
+        self.chat.config(state=tk.NORMAL)
+        self.chat.insert(tk.END, text, "amah_txt")
+        self.chat.see(tk.END)
+        self.chat.config(state=tk.DISABLED)
+
+    def _finish_streamed_reply(self, reply):
+        self._last_reply = reply
+        self._write(("\n\n", "amah_txt"))
+        self._after_reply()
 
     def _format_error(self, error: str) -> str:
         if "rate_limit_exceeded" in error or "Rate limit" in error:
@@ -716,9 +787,11 @@ class AmahGUI:
         try:
             from tools.voice import speak
             short = text[:220].replace("\n", " ")
-            speak(short, speed=1)
-        except Exception:
-            pass
+            res = speak(short, speed=1)
+            if "error" in res:
+                self.root.after(0, self._set_status, "[!] Voix indisponible", "#cc4444")
+        except Exception as e:
+            self.root.after(0, self._set_status, f"[!] Voix indisponible : {e}"[:60], "#cc4444")
 
     def _show_error(self, error):
         self.chat.config(state=tk.NORMAL)
@@ -1029,88 +1102,43 @@ class AmahGUI:
             tail = tail[1:]
         self.messages = [system] + tail
 
-    def _next_key(self):
-        """Bascule vers la clé API suivante disponible."""
-        nb = len(self._api_keys)
-        if nb <= 1:
-            return False
-        self._key_index = (self._key_index + 1) % nb
-        self.client = Groq(api_key=self._api_keys[self._key_index])
-        return True
-
     def _groq_call(self, messages, tools=None, model_override=None):
-        """Appel Groq avec rotation de clés + retry backoff (1s, 2s, 4s).
+        """Appel Groq via le client partage (rotation de cles + retry backoff geres
+        de maniere centrale dans GroqClient — voir groq_client.py).
         model_override : force un modèle spécifique (ex: 8B pour questions simples)
         """
-        used_model = model_override or MODEL
-        kwargs = dict(model=used_model, messages=messages, max_tokens=1024, temperature=0.4)
-        if tools:
-            kwargs["tools"] = tools; kwargs["tool_choice"] = "auto"
+        return self.groq.chat(
+            messages, model=model_override or MODEL, tools=tools,
+            max_tokens=1024, temperature=0.4,
+            on_status=lambda txt: self.root.after(0, self._set_status, txt),
+        )
 
-        keys_tried = 0
-        delays     = [1, 2, 4]
-
-        for attempt in range(len(delays) * len(self._api_keys)):
-            try:
-                return self.client.chat.completions.create(**kwargs)
-            except Exception as e:
-                err = str(e)
-                is_limit = "429" in err or "rate_limit" in err or "TPD" in err or "TPM" in err
-
-                if is_limit:
-                    # Essaie d'abord de changer de clé
-                    if keys_tried < len(self._api_keys) - 1 and self._next_key():
-                        keys_tried += 1
-                        nb_keys = len(self._api_keys)
-                        idx     = self._key_index + 1
-                        self.root.after(0, self._set_status,
-                            f"Cle {idx}/{nb_keys} — limite atteinte, rotation...")
-                        continue
-                    # Plus de clé dispo → attente backoff
-                    delay = delays[min(attempt, len(delays)-1)]
-                    self.root.after(0, self._set_status,
-                        f"Toutes les cles limitees — attente {delay}s...")
-                    time.sleep(delay)
-                elif "503" in err:
-                    delay = delays[min(attempt, len(delays)-1)]
-                    time.sleep(delay)
-                else:
-                    raise
-
-    def _chat(self) -> str:
+    def _chat(self, last_user: str, tools) -> str:
         self._trim_messages()
 
-        # Sélection ciblée des outils : envoie uniquement la catégorie pertinente
-        last_user = next(
-            (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
-        )
-        tools = self._select_tools(last_user)
-
         # ── Sélection du modèle selon la complexité ───────────────────────────
-        # Questions simples (salutation, calcul rapide, date...) → 8B instant
-        # Tâches avec outils → 70B versatile (qualité + tool use)
-        SIMPLE_PATTERNS = {
-            "bonjour","bonsoir","salut","hello","hi","merci","ok","oui","non",
-            "comment","quoi","qui","quand","pourquoi","combien","cest","cest-quoi",
-            "explique","dis","repete","aide","help","test","essai",
-        }
-        words_lower = set(last_user.lower().replace("'", " ").split())
-        is_simple   = (len(last_user.split()) <= 6 and
-                       bool(words_lower & SIMPLE_PATTERNS) and
-                       not tools)
-
-        if is_simple:
-            active_model = "llama-3.1-8b-instant"
-            self.root.after(0, self._set_status, "Amah reflechit...")
-        elif not tools:
+        # Les questions simples/conversationnelles (8B, sans outils) sont
+        # interceptées en amont par _run_chat et passent par _chat_stream ;
+        # ici il ne reste que les tâches qui nécessitent le 70B (avec ou
+        # sans outils ciblés).
+        if not tools:
             active_model = MODEL
+            # Filet par défaut quand aucune catégorie de mots-clés n'a matché :
+            # uniquement des outils de LECTURE / information, sans effet de bord.
+            # Les outils a action ou sensibles (send_email, run_command, speak,
+            # open_file, save_memory, open_youtube...) sont VOLONTAIREMENT exclus
+            # d'ici : ils ont deja leur propre categorie (email/systeme/media...)
+            # qui se charge quand des mots-cles pertinents apparaissent. Les
+            # laisser dans ce filet generique a deja cause un envoi d'email et
+            # une synthese vocale non sollicites pendant une simple conversation
+            # ("parle-moi de toi" -> le modele a hallucine des appels d'outils
+            # juste parce qu'ils etaient disponibles).
             DEFAULT_TOOLS = {
                 "web_search","read_webpage","list_files","read_file",
-                "open_file","run_command","create_word","get_datetime","calculate",
-                "save_memory","get_memories","read_emails","send_email",
-                "get_system_info","speak",
+                "get_datetime","calculate","get_memories",
+                "get_system_info",
                 "get_weather","get_weather_simple",   # météo souvent demandée
-                "translate","open_youtube","play_music",  # traduction / musique
+                "translate",
             }
             tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in DEFAULT_TOOLS]
             self.root.after(0, self._set_status, "Amah reflechit...")

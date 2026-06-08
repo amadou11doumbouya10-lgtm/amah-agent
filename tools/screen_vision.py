@@ -1,27 +1,14 @@
-import os
 import io
 import base64
 
-
-def _get_groq_key() -> str:
-    """Retourne la première clé Groq disponible."""
-    for k in ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]:
-        v = os.getenv(k)
-        if v and not v.startswith("AJOUTER"):
-            return v
-    return None
+from groq_client import GroqClient
 
 
 def analyze_screen(question: str = "Decris precisement ce que tu vois sur cet ecran.") -> dict:
-    """Capture l'ecran complet et l'analyse par IA visuelle (Groq llama-3.2-vision).
+    """Capture l'ecran complet et l'analyse par IA visuelle (Groq llama-4-scout, multimodal).
     Utilisation : que vois-tu sur mon ecran ? / lis ce texte / analyse cette fenetre."""
     try:
         from PIL import ImageGrab
-        from groq import Groq
-
-        key = _get_groq_key()
-        if not key:
-            return {"error": "Cle API Groq introuvable dans .env"}
 
         # Capture + redimensionnement pour limiter les tokens
         img = ImageGrab.grab()
@@ -31,9 +18,8 @@ def analyze_screen(question: str = "Decris precisement ce que tu vois sur cet ec
         img.save(buf, format='JPEG', quality=82)
         b64 = base64.b64encode(buf.getvalue()).decode()
 
-        client = Groq(api_key=key)
-        resp = client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
+        client = GroqClient.get()
+        resp = client.chat(
             messages=[{
                 "role": "user",
                 "content": [
@@ -41,6 +27,7 @@ def analyze_screen(question: str = "Decris precisement ce que tu vois sur cet ec
                     {"type": "text", "text": question},
                 ]
             }],
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             max_tokens=1024,
         )
         return {

@@ -16,9 +16,10 @@ _env = (Path(sys.executable).parent / ".env"
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
 
-from groq import Groq
+from groq_client import GroqClient
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS
+from tools.voice import speak
 
 # ── Palette cyberpunk / HUD ──────────────────────────────────────────────────
 BG        = "#03050a"        # noir presque pur, légère teinte bleue
@@ -141,10 +142,10 @@ def _hex_points(cx, cy, r, angle_offset=0):
 class AmahVoiceUI:
 
     def __init__(self):
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise SystemExit("GROQ_API_KEY manquant dans .env")
-        self.client   = Groq(api_key=api_key)
+        try:
+            self.client = GroqClient.get()
+        except RuntimeError as e:
+            raise SystemExit(str(e))
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         self.state    = "IDLE"
@@ -153,6 +154,7 @@ class AmahVoiceUI:
         self._color   = CYAN_DIM
         self._label   = STATES["IDLE"][1]
         self._mic_ready = False   # True une fois le micro calibré
+        self._mic_error = ""      # raison de l'échec d'init, affichée à l'utilisateur
         self._sr = None
         self._mic = None
 
@@ -382,21 +384,31 @@ class AmahVoiceUI:
             with self._mic as src:
                 self._sr.adjust_for_ambient_noise(src, duration=1.0)
             self._mic_ready = True
-        except Exception:
+        except Exception as e:
             self._mic_ready = False
+            self._mic_error = str(e)
 
     def _listen_once(self):
         """Écoute une phrase (max 6s). Retourne le texte ou None."""
         if not self._mic_ready or self._sr is None:
             time.sleep(0.5)
             return None
+        import speech_recognition as sr
         try:
-            import speech_recognition as sr
             with self._mic as src:
                 audio = self._sr.listen(src, timeout=5, phrase_time_limit=6)
+        except sr.WaitTimeoutError:
+            return None   # rien dit dans le délai imparti
+        try:
             return self._sr.recognize_google(audio, language="fr-FR")
-        except Exception:
-            return None   # silence ou incompréhensible
+        except sr.UnknownValueError:
+            return None   # parole incomprise
+        except sr.RequestError as e:
+            # Vrai problème (pas de réseau, API Google indisponible…) : à signaler
+            self.root.after(0, self._set_state, "ERREUR", "",
+                            f"Reconnaissance vocale indisponible : {str(e)[:120]}")
+            time.sleep(2.0)
+            return None
 
     def _start_loop(self):
         threading.Thread(target=self._loop, daemon=True).start()
@@ -408,8 +420,9 @@ class AmahVoiceUI:
             time.sleep(0.3)
 
         if not self._mic_ready:
+            detail = f" : {self._mic_error[:120]}" if self._mic_error else ""
             self.root.after(0, self._set_state, "ERREUR", "",
-                            "Micro indisponible")
+                            f"Micro indisponible{detail}")
             return
 
         self.root.after(0, self._set_state, "ECOUTE")
@@ -423,8 +436,8 @@ class AmahVoiceUI:
             # Fermeture vocale
             if any(w in texte.lower() for w in STOP_WORDS):
                 self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
-                self._speak_bg("À bientôt.")
-                time.sleep(2.0)
+                speak("À bientôt.")
+                time.sleep(0.3)
                 self.root.after(0, self._quit)
                 return
 
@@ -438,10 +451,14 @@ class AmahVoiceUI:
                 time.sleep(2.5)
             else:
                 self.root.after(0, self._set_state, "REPOND", f'« {texte} »', short)
-                self._speak_bg(reply[:450])
-                # Pause proportionnelle à la longueur de la réponse
-                duration = max(1.5, len(reply.split()) / 2.5)
-                time.sleep(min(duration, 8.0))
+                # speak() est bloquant : on attend la fin réelle de la voix
+                # au lieu d'estimer une durée, et on affiche l'erreur si la
+                # synthèse échoue plutôt que de l'avaler en silence.
+                voice_res = speak(reply[:450], speed=2)
+                if "error" in voice_res:
+                    self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
+                                    f"Voix indisponible : {voice_res['error'][:120]}")
+                    time.sleep(1.5)
 
             if self._running:
                 self.root.after(0, self._set_state, "ECOUTE")
@@ -456,12 +473,10 @@ class AmahVoiceUI:
         model = MODEL_FULL if tools else MODEL_FAST
 
         def _call(msgs, tl):
-            kw = {"model": model, "messages": msgs,
-                  "max_tokens": 1024, "temperature": 0.4}
-            if tl:
-                kw["tools"] = tl
-                kw["tool_choice"] = "auto"
-            return self.client.chat.completions.create(**kw)
+            return self.client.chat(
+                messages=msgs, model=model, tools=tl,
+                max_tokens=1024, temperature=0.4,
+            )
 
         try:
             resp = _call(self.messages, tools)
@@ -504,15 +519,6 @@ class AmahVoiceUI:
             return json.dumps(func(**args), ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})
-
-    def _speak_bg(self, text: str):
-        def _do():
-            try:
-                from tools.voice import speak
-                speak(text, speed=2)
-            except Exception:
-                pass
-        threading.Thread(target=_do, daemon=True).start()
 
     # ── Contrôles ─────────────────────────────────────────────────────────────
 

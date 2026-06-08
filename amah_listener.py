@@ -82,6 +82,8 @@ class ListenerWidget:
                              bg="#0a1020", fg=CYAN, font=("Consolas", 9),
                              activebackground=CYAN_DIM, activeforeground=CYAN)
         self._menu.add_command(label="Ouvrir interface vocale", command=self._open_voice)
+        self._menu.add_command(label="Masquer le widget (Ctrl+Shift+M pour le revoir)",
+                               command=self._hide)
         self._menu.add_separator()
         self._menu.add_command(label="Quitter Amah Listener", command=self._quit)
 
@@ -227,29 +229,47 @@ class ListenerWidget:
             except Exception:
                 time.sleep(0.5)
 
+    @staticmethod
+    def _edit_distance(a: str, b: str) -> int:
+        """Distance de Levenshtein simple (pour tolérer les fautes de transcription)."""
+        if a == b:
+            return 0
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i] + [0] * len(b)
+            for j, cb in enumerate(b, 1):
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (ca != cb))
+            prev = curr
+        return prev[-1]
+
     def _is_wake(self, text: str) -> bool:
-        """Vérifie si le texte contient une variante du mot de réveil."""
-        words = text.split()
+        """Vérifie si le texte contient une variante du mot de réveil "Amah"."""
+        words = text.lower().split()
         for w in words:
             w = w.strip(".,!?")
+            if not w:
+                continue
             if w in WAKE_WORDS:
                 return True
-            # Distance phonétique simple : commence par "am" ou "em" + courte
-            if len(w) <= 5 and (w.startswith("am") or w.startswith("em")):
+            # Tolère les transcriptions proches ("amat", "amaa"…) sans matcher
+            # des mots français courants comme "ami", "amour", "amène".
+            if 3 <= len(w) <= 6 and self._edit_distance(w, "amah") <= 1:
                 return True
         return False
 
     # ── Raccourci clavier global ──────────────────────────────────────────────
 
     def _start_hotkey(self):
-        """Ctrl+Shift+A → ouvre l'interface vocale (backup si reconnaissance échoue)."""
+        """Ctrl+Shift+A → ouvre l'interface vocale, Ctrl+Shift+M → affiche/masque
+        le widget (backup clavier, utile si la reconnaissance vocale échoue ou
+        si le widget est masqué)."""
         try:
             from pynput import keyboard as kb
 
-            def _on_activate():
-                self.root.after(0, self._open_voice)
-
-            h = kb.GlobalHotKeys({"<ctrl>+<shift>+a": _on_activate})
+            h = kb.GlobalHotKeys({
+                "<ctrl>+<shift>+a": lambda: self.root.after(0, self._open_voice),
+                "<ctrl>+<shift>+m": lambda: self.root.after(0, self._toggle_visibility),
+            })
             t = threading.Thread(target=h.run, daemon=True)
             t.start()
         except Exception:
@@ -280,6 +300,18 @@ class ListenerWidget:
             self._set("ECOUTE", CYAN_DIM)
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def _hide(self):
+        """Cache le widget de l'écran sans rien arrêter : la détection du mot
+        de réveil tourne dans son propre thread et continue d'écouter même
+        fenêtre masquée. Ctrl+Shift+M (ou redire "Amah") le fait revenir."""
+        self.root.withdraw()
+
+    def _toggle_visibility(self):
+        if self.root.state() == "withdrawn":
+            self.root.deiconify()
+        else:
+            self.root.withdraw()
 
     def _quit(self):
         self._running = False

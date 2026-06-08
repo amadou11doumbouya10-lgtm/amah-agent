@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/IA-Groq%20%7C%20Llama%203.3-orange" />
   <img src="https://img.shields.io/badge/Outils-78-gold" />
-  <img src="https://img.shields.io/badge/Version-1.4.1-C8A96E" />
+  <img src="https://img.shields.io/badge/Version-1.4.2-C8A96E" />
   <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D4?logo=windows" />
   <img src="https://img.shields.io/badge/Interface-tkinter-green" />
   <img src="https://img.shields.io/badge/Licence-Propriétaire-red" />
@@ -212,6 +212,7 @@ Le dossier `dist/` contient tout le livrable :
 
 | Version | Date | Nouveautés |
 |---------|------|-----------|
+| v1.4.2 | 08/06/2026 | Streaming des réponses simples (texte progressif), GroqClient centralisé (rotation de clés partagée gui/outils), fix placeholder "réfléchit..." persistant, fix modèle vision décommissionné |
 | v1.4.1 | 07/06/2026 | Fix routage outils (normalisation accents météo/traduction), sécurité tool routing renforcée |
 | v1.4.0 | 05/06/2026 | +11 outils (hardware, vision, YouTube, vols, planificateur), interface vocale HUD animée, monitoring CPU/RAM, effet machine à écrire |
 | v1.3.0 | 04/06/2026 | Routage modèle 8B/70B, logo hexagone, email optimisé, tokens -75%, rotation 3 clés Groq |

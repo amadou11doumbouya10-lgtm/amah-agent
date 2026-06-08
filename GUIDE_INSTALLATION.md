@@ -1,5 +1,5 @@
 # Guide d'installation — Amah Agent
-*Version 1.4.1 — Juin 2026*
+*Version 1.4.2 — Juin 2026*
 
 ---
 
@@ -49,7 +49,7 @@ Un écran de configuration s'ouvre automatiquement :
 
 ```
 ┌────────────────────────────────────────────┐
-│   THE AMAH — PREMIER LANCEMENT  v1.4.1    │
+│   THE AMAH — PREMIER LANCEMENT  v1.4.2    │
 │   Configure tes accès pour démarrer       │
 ├────────────────────────────────────────────┤
 │                                            │

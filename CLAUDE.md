@@ -4,7 +4,7 @@
 Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit). 79 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
-Version actuelle : **v1.4.1**
+Version actuelle : **v1.4.2**
 
 ## Structure
 ```
@@ -265,10 +265,35 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
 - [x] Sécurité tool routing renforcée
 - [x] Kit_Client_Amah recompilé avec gui.py (interface stable)
 
+## Etat — v1.4.2 (08/06/2026)
+- [x] **GroqClient centralisé** (groq_client.py) : singleton partagé par gui.py,
+  tools/planner.py, tools/screen_vision.py et voice_fullscreen.py — fin des
+  rotations de clés indépendantes (un outil pouvait rester bloqué sur une clé
+  limitée pendant que gui.py tournait déjà sur la clé 2)
+- [x] Fix bug prod découvert pendant la migration : analyze_screen utilisait un
+  modèle vision décommissionné (llama-3.2-11b-vision-preview) →
+  meta-llama/llama-4-scout-17b-16e-instruct
+- [x] **Streaming des réponses simples** (8B, sans outils) : le texte
+  apparaît au fur et à mesure au lieu d'attendre la réponse complète avant
+  l'effet machine à écrire (_chat_stream dans gui.py) — latence perçue
+  nettement réduite sur les échanges conversationnels courants
+- [x] Fix bug chat : le placeholder "Amah réfléchit..." restait affiché
+  au-dessus de chaque réponse (la marque Tk posée sur tk.END finissait après
+  le texte inséré au lieu d'avant → corrigé avec "end-1c")
+- [x] speak() rendu synchrone/bloquant avec les vraies erreurs PowerShell
+  remontées (fin du fire-and-forget qui annonçait toujours un faux succès)
+- [x] amah_listener.py : détection du mot de réveil "Amah" par distance de
+  Levenshtein (moins de faux positifs/négatifs que l'ancienne heuristique)
+- [x] System prompt : règle factuelle (web_search avant une réponse incertaine),
+  règle de confirmation pour les outils sensibles (run_command/kill_process/
+  delete_file/wifi_toggle), guidance sur la gestion des erreurs d'outils
+- [x] Routeur (SIMPLE_PATTERNS) corrigé pour laisser passer les vraies
+  questions factuelles vers le 70B + web_search au lieu de les confondre avec
+  des phrases sociales
+
 ## Prochaines améliorations possibles
 - [ ] Licence entreprise volume (une clé pour N postes)
 - [ ] Google Calendar (agenda)
-- [ ] Streaming réponse Groq dans tkinter
 - [ ] Dashboard journalier automatique
 - [ ] Connexion Telegram bot
 - [ ] Wake word hors ligne (Porcupine / openWakeWord) pour ne pas dépendre de Google Speech API

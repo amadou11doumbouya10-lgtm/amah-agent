@@ -1,4 +1,4 @@
-# Amah Agent — Toutes les capacités (v1.4.1)
+# Amah Agent — Toutes les capacités (v1.4.2)
 
 > **79 outils réels** • Fonctionne hors ligne • Windows 11 • Mis à jour le 07/06/2026
 

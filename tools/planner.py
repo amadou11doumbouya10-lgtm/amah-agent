@@ -1,5 +1,6 @@
-import os
 import json
+
+from groq_client import GroqClient
 
 
 _PLAN_SYSTEM = """Tu es un planificateur de taches IA. Pour l'objectif donne, genere un plan JSON structure avec des etapes sequentielles.
@@ -43,24 +44,14 @@ Regles strictes:
 def create_plan(goal: str) -> dict:
     """Genere un plan multi-etapes structure (JSON) pour atteindre un objectif complexe (3+ actions).
     Utilise cet outil pour les taches qui necessitent plusieurs outils en sequence."""
-    key = None
-    for k in ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]:
-        v = os.getenv(k)
-        if v and not v.startswith("AJOUTER"):
-            key = v
-            break
-    if not key:
-        return {"error": "Cle API Groq introuvable dans .env"}
-
     try:
-        from groq import Groq
-        client = Groq(api_key=key)
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        client = GroqClient.get()
+        resp = client.chat(
             messages=[
                 {"role": "system", "content": _PLAN_SYSTEM},
                 {"role": "user", "content": f"Objectif: {goal}"},
             ],
+            model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"},
             max_tokens=1024,
             temperature=0.2,
@@ -69,5 +60,7 @@ def create_plan(goal: str) -> dict:
         return {"success": True, **plan}
     except json.JSONDecodeError:
         return {"error": "Plan invalide (JSON malformate)"}
+    except RuntimeError as e:
+        return {"error": str(e)}
     except Exception as e:
         return {"error": str(e)}
