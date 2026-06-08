@@ -89,6 +89,14 @@ class GroqClient:
                     time.sleep(delay)
                 elif "503" in err:
                     time.sleep(_DELAYS[min(attempt, len(_DELAYS) - 1)])
+                elif "timeout" in err.lower() or "timed out" in err.lower():
+                    # Un timeout est presque toujours un alea reseau passager
+                    # (recherche web lente, Groq momentanement lent...) -- on
+                    # retente avec backoff au lieu de remonter direct une
+                    # erreur a l'utilisateur des le premier coup.
+                    if on_status:
+                        on_status("Reponse lente — nouvelle tentative...")
+                    time.sleep(_DELAYS[min(attempt, len(_DELAYS) - 1)])
                 else:
                     raise
 

@@ -721,12 +721,27 @@ class AmahGUI:
     def _format_error(self, error: str) -> str:
         if "rate_limit_exceeded" in error or "Rate limit" in error:
             import re
-            wait = re.search(r"try again in (.+?)\.", error)
-            temps = wait.group(1) if wait else "quelques minutes"
+            # ".+?\." s'arretait au premier point rencontre -- "7.66s." donnait
+            # "7" au lieu de "7.66s". On exige un point SUIVI d'un espace pour
+            # cibler la fin de la duree (".66s. Visite..." -> "7.66s").
+            wait = re.search(r"try again in (.+?)\.\s", error)
+            temps = wait.group(1) if wait else "quelques instants"
+            # Groq distingue les limites "par minute" (TPM/RPM -- throttling
+            # court qui se debloque tout seul en quelques secondes) des limites
+            # "par jour" (TPD/RPD -- vraie penurie de quota). Annoncer "limite
+            # quotidienne... attends 7 secondes" est contradictoire et alarme
+            # inutilement l'utilisateur pour un simple ralentissement passager.
+            if re.search(r"per day|tokens per day|requests per day|TPD|RPD",
+                         error, re.IGNORECASE):
+                return (
+                    f"Limite quotidienne Groq atteinte.\n"
+                    f"Attends {temps} avant de continuer.\n"
+                    f"Ou cree un 2eme compte gratuit sur console.groq.com"
+                )
             return (
-                f"Limite quotidienne Groq atteinte.\n"
-                f"Attends {temps} avant de continuer.\n"
-                f"Ou cree un 2eme compte gratuit sur console.groq.com"
+                f"Limite Groq temporaire (quelques requetes par minute).\n"
+                f"Patiente {temps}, ca se debloque tout seul -- "
+                f"pas besoin d'attendre jusqu'a demain."
             )
         if "invalid_api_key" in error or "API key" in error.lower():
             return "Cle API Groq invalide. Verifie ta cle dans le fichier .env"
