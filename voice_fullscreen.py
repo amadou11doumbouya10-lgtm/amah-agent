@@ -15,10 +15,6 @@ _env = (Path(sys.executable).parent / ".env"
         if getattr(sys, "frozen", False)
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
-
-from groq_client import GroqClient
-from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
-from tools import TOOL_FUNCTIONS
 from tools.voice import speak
 
 # ── Palette cyberpunk / HUD ──────────────────────────────────────────────────
@@ -84,6 +80,8 @@ _WORD_TO_CAT = {
     "volume":"hardware","son":"hardware","muet":"hardware","luminosite":"hardware",
     "wifi":"hardware","lumiere":"hardware","sombre":"hardware",
     "vois":"vision","observe":"vision","ecran":"vision","analyse":"vision",
+    "mon-ecran":"vision","sur-ecran":"vision","l-ecran":"vision","regarde":"vision",
+    "lire-ecran":"vision","lis-ecran":"vision","que-vois":"vision","ecrat":"vision",
     "vol":"flights","vols":"flights","avion":"flights","billet":"flights","voyage":"flights",
     "plan":"planner","etapes":"planner","sequence":"planner",
 }

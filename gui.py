@@ -1002,7 +1002,7 @@ class AmahGUI:
         "ecoute":"media","microphone":"media","micro":"media","notification":"media",
         "notifie":"media","alerte":"media","rappel":"media","rappelle-moi":"media",
         "dans-x-minutes":"media","dans-x-heures":"media","bip":"media",
-        "screenshot-ecran":"media","capture-ecran":"media","ecran":"media",
+        "screenshot-ecran":"media","capture-ecran":"media",
         # images
         "image":"images","images":"images","photo":"images","photos":"images",
         "redimensionne":"images","resize":"images","convertis-image":"images",
@@ -1023,10 +1023,15 @@ class AmahGUI:
         "sombre":"hardware","clarte":"hardware","eclairer":"hardware","assombrir":"hardware",
         "wifi":"hardware","wi-fi":"hardware","sans-fil":"hardware","wlan":"hardware",
         "bluetooth":"hardware","reseau-wifi":"hardware",
-        # vision ecran (v1.4)
+        # vision ecran (v1.4+)
         "vois-ecran":"vision","regarde-ecran":"vision","observe":"vision",
         "analyse-mon-ecran":"vision","que-vois-tu":"vision","vision":"vision",
         "vois-tu":"vision","regardes":"vision","captur":"vision",
+        # mots seuls ou paires qui signifient "regarde ce qui est sur l'ecran"
+        "ecran":"vision","mon-ecran":"vision","sur-ecran":"vision",
+        "l-ecran":"vision","lis-ecran":"vision","lire-ecran":"vision",
+        "que-vois":"vision","regarde":"vision","vois":"vision",
+        "lit-ecran":"vision","ecrat":"vision","quoi-sur":"vision",
         # youtube (v1.4)
         "youtube":"youtube","yt":"youtube","video":"youtube","videos":"youtube",
         "musique":"youtube","chanson":"youtube","chansons":"youtube",

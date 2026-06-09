@@ -1,6 +1,9 @@
 import subprocess
 import tempfile
 import os
+import logging
+
+log = logging.getLogger("amah.computer_settings")
 
 
 def _run_ps(cmd: str) -> tuple:
@@ -38,8 +41,8 @@ def _run_ps_file(script: str) -> tuple:
         if fname:
             try:
                 os.unlink(fname)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppression du fichier temporaire {fname} ignoree : {e}")
 
 
 # Définition C# commune pour le contrôle audio Windows (WinMM + keybd_event)

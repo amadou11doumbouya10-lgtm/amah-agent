@@ -1,5 +1,8 @@
 from playwright.sync_api import sync_playwright, Browser, Page
 import atexit
+import logging
+
+log = logging.getLogger("amah.browser")
 
 _playwright = None
 _browser: Browser = None
@@ -13,8 +16,8 @@ def _close_browser():
             _browser.close()
         if _playwright:
             _playwright.stop()
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Fermeture du navigateur ignoree : {e}")
 
 
 atexit.register(_close_browser)

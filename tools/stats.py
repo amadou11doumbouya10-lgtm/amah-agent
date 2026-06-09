@@ -3,8 +3,11 @@ Statistiques d'utilisation d'Amah — stockées dans amah_memory.db.
 """
 import sys
 import sqlite3
+import logging
 from pathlib import Path
 from datetime import datetime
+
+log = logging.getLogger("amah.stats")
 
 if getattr(sys, 'frozen', False):
     DB_PATH = Path(sys.executable).parent / "amah_memory.db"
@@ -35,8 +38,8 @@ def record_tool_use(tool_name: str) -> None:
         )
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Enregistrement de l'usage de l'outil '{tool_name}' ignore : {e}")
 
 
 def get_stats(days: int = 30) -> dict:

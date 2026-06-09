@@ -2,9 +2,12 @@ import os
 import imaplib
 import smtplib
 import email
+import logging
 from email.mime.text import MIMEText
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
+
+log = logging.getLogger("amah.email_tool")
 
 IMAP_HOST = 'imap.gmail.com'
 SMTP_HOST = 'smtp.gmail.com'
@@ -88,25 +91,6 @@ def read_emails(n: int = 5) -> dict:
         # 3. Récupère en-têtes DATE + FROM + SUBJECT + LIST-UNSUBSCRIBE pour chaque candidat
         # LIST-UNSUBSCRIBE est présent dans TOUS les newsletters — absent dans les emails perso
         emails_with_date = []
-        for uid in candidate_uids:
-            _, hdr_data = conn.uid(
-                'FETCH', uid,
-                '(BODY.PEEK[HEADER.FIELDS (DATE FROM SUBJECT LIST-UNSUBSCRIBE)])'
-            )
-            if not hdr_data or not hdr_data[0] or not isinstance(hdr_data[0], tuple):
-                continue
-            hdr          = email.message_from_bytes(hdr_data[0][1])
-            date_str     = hdr.get('Date', '')
-            from_str     = _decode(hdr.get('From', ''))
-            subj_str     = _decode(hdr.get('Subject', ''))
-            is_newsletter = bool(hdr.get('List-Unsubscribe', ''))
-            try:
-                dt = parsedate_to_datetime(date_str)
-            except Exception:
-                dt = None
-            emails_with_date.append((uid, dt, date_str, from_str, subj_str, is_newsletter))
-
-        # 4. Trie par date décroissante
         emails_with_date.sort(
             key=lambda x: x[1].timestamp() if x[1] else 0,
             reverse=True
@@ -144,8 +128,8 @@ def read_emails(n: int = 5) -> dict:
         try:
             if conn:
                 conn.logout()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Deconnexion IMAP ignoree : {e}")
 
 
 def send_email(to: str, subject: str, body: str) -> dict:
@@ -197,8 +181,8 @@ def search_emails(query: str) -> dict:
         try:
             if conn:
                 conn.logout()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Deconnexion IMAP ignoree : {e}")
 
 
 def draft_email(to: str, subject: str, body: str) -> dict:

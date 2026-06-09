@@ -10,8 +10,19 @@ import subprocess
 import sys
 import os
 
-# Clé secrète lue depuis .env (AMAH_LICENSE_SECRET) ; fallback sur valeur par défaut
-_SECRET = os.getenv("AMAH_LICENSE_SECRET", "amah-agent-2026-mk-secret-key-v1").encode()
+def _get_secret() -> bytes:
+    """Lit le secret de licence depuis .env -- AUCUNE valeur par défaut :
+    un secret codé en dur dans les sources annulerait la protection HMAC
+    pour tous les clients si .env est absent ou mal chargé (fail-closed).
+    Lu à l'appel (pas au chargement du module) car load_dotenv() s'exécute
+    après l'import de ce module dans gui.py."""
+    secret = os.getenv("AMAH_LICENSE_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "AMAH_LICENSE_SECRET manquant dans .env -- impossible de generer "
+            "ou de valider une licence sans ce secret."
+        )
+    return secret.encode()
 
 
 def get_machine_id() -> str:
@@ -40,7 +51,7 @@ def get_machine_id() -> str:
 
 def generate_license_key(machine_id: str) -> str:
     """Génère une clé de licence pour un machine_id donné."""
-    raw = hmac.new(_SECRET, machine_id.encode(), hashlib.sha256).hexdigest()
+    raw = hmac.new(_get_secret(), machine_id.encode(), hashlib.sha256).hexdigest()
     # Format : XXXXX-XXXXX-XXXXX-XXXXX (20 caractères hex)
     key = raw[:20].upper()
     return f"{key[:5]}-{key[5:10]}-{key[10:15]}-{key[15:20]}"
@@ -51,7 +62,10 @@ def validate_license(key: str) -> bool:
     machine_id = get_machine_id()
     if machine_id == "UNKNOWN":
         return False  # Fail closed : refuse si l'ID machine est illisible
-    expected = generate_license_key(machine_id)
+    try:
+        expected = generate_license_key(machine_id)
+    except RuntimeError:
+        return False  # Fail closed : pas de secret configure => aucune cle valide
     clean_key = key.upper().replace("-", "").replace(" ", "")
     clean_exp = expected.upper().replace("-", "")
     return clean_key == clean_exp
@@ -80,6 +94,10 @@ def get_license_info() -> dict:
 
 # ── Outil en ligne de commande pour générer une clé ─────────────────────────
 if __name__ == "__main__":
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     if len(sys.argv) == 2:
         mid = sys.argv[1]
         key = generate_license_key(mid)
