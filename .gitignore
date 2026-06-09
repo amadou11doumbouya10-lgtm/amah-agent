@@ -35,3 +35,35 @@ developpeur/
 .vscode/
 .idea/
 *.swp
+
+# Logs de build
+build_log*.txt
+
+# Mémoire interne Claude Code
+.claude/
+
+# Fichiers média lourds (vidéos/audios de présentation)
+voix/*.mp4
+voix/*.mp3
+voix/*.wav
+voix/*.m4a
+voix/*.png
+voix/*.srt
+voix/concat*.txt
+voix/tmp_*.png
+voix/screens/
+voix/__pycache__/
+music/
+
+# Fichiers temporaires et tests
+test_*.py
+gui_old.py
+code_de_creation.txt
+portfolio_temp.html
+profile_readme_temp/
+
+# Images de travail icône
+amah_ico_*.png
+amah_ico_*.jpeg
+logo_reference.jpeg
+check_ico.py
