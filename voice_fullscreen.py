@@ -88,6 +88,7 @@ _WORD_TO_CAT = {
     "carte":"internet","cartes":"internet","drapeau":"internet","drapeaux":"internet",
     "vol":"flights","vols":"flights","avion":"flights","billet":"flights","voyage":"flights",
     "plan":"planner","etapes":"planner","sequence":"planner",
+    "steam":"jeux","epic":"jeux","jeu":"jeux","jeux":"jeux",
 }
 
 _CAT_TOOLS = {
@@ -107,6 +108,8 @@ _CAT_TOOLS = {
     "youtube":   {"open_youtube","search_youtube","open_browser","web_search"},
     "flights":   {"search_flights","web_search","open_browser"},
     "planner":   {"create_plan"},
+    "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
+                   "launch_game_steam","search_game_on_steam","install_game_steam"},
 }
 
 def _select_tools(message: str):

@@ -99,6 +99,13 @@ TOOL_LABELS = {
     "write_code":        "ecriture code",
     "run_code":          "execution code",
     "explain_code":      "explication code",
+    # Jeux (v1.5)
+    "open_steam":              "ouverture Steam",
+    "open_epic_games":         "ouverture Epic Games",
+    "list_installed_steam_games": "liste jeux Steam",
+    "launch_game_steam":       "lancement jeu",
+    "search_game_on_steam":    "recherche jeu Steam",
+    "install_game_steam":      "installation jeu",
 }
 
 
@@ -376,6 +383,8 @@ class AmahGUI:
             ("Vision",        ["analyze_screen","screenshot_full"]),
             ("YouTube",       ["open_youtube","search_youtube","play_music"]),
             ("Vols",          ["search_flights"]),
+            ("Jeux",          ["open_steam","open_epic_games","list_installed_steam_games",
+                               "launch_game_steam","search_game_on_steam","install_game_steam"]),
             ("Media/Voix",    ["speak","listen","listen_continuous",
                                "send_notification","set_reminder"]),
             ("Excel",         ["read_excel","create_excel","append_to_excel"]),
@@ -894,9 +903,11 @@ class AmahGUI:
             "Vision":      ["analyze_screen","screenshot_full"],
             "YouTube":     ["open_youtube","search_youtube","play_music"],
             "Vols":        ["search_flights"],
+            "Jeux":        ["open_steam","open_epic_games","list_installed_steam_games",
+                            "launch_game_steam","search_game_on_steam","install_game_steam"],
             "Planif":      ["create_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n  — 87 outils disponibles —\n\n", "dim"))
+        self._write(("\n  — 93 outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -1068,6 +1079,9 @@ class AmahGUI:
         "musique":"youtube","chanson":"youtube","chansons":"youtube","joue":"youtube",
         "jouer":"youtube","mets":"youtube","ecouter":"youtube","écoute":"youtube",
         "music":"youtube","song":"youtube","play":"youtube",
+        # jeux Steam/Epic (v1.5)
+        "steam":"jeux","epic":"jeux","epicgames":"jeux","jeu":"jeux","jeux":"jeux",
+        "gamer":"jeux","videogame":"jeux","installe-jeu":"jeux","demarre-jeu":"jeux",
     }
 
     # Catégories → noms d'outils inclus
@@ -1091,6 +1105,8 @@ class AmahGUI:
         "youtube":   {"open_youtube","search_youtube","play_music","open_browser","web_search"},
         "flights":   {"search_flights","web_search","open_browser"},
         "planner":   {"create_plan"},
+        "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
+                       "launch_game_steam","search_game_on_steam","install_game_steam"},
     }
 
     def _select_tools(self, message: str):

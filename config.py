@@ -142,4 +142,11 @@ TOOLS_DEFINITIONS = [
     _f("write_code",      "Ecrit du code dans un fichier (py, js, html, css, etc.)",    {"filename": _s("chemin du fichier"), "code": _s("code complet"), "language": _s("langage ex: python")}, ["filename","code"]),
     _f("run_code",        "Execute un fichier Python (.py) ou JavaScript (.js) et retourne la sortie", {"path": _s("chemin du fichier a executer")}, ["path"]),
     _f("explain_code",    "Lit un fichier de code pour l'analyser et l'expliquer",       {"path": _s("chemin du fichier de code")}, ["path"]),
+    # Jeux (v1.5)
+    _f("open_steam",                "Ouvre l'application Steam"),
+    _f("open_epic_games",           "Ouvre Epic Games Launcher"),
+    _f("list_installed_steam_games","Liste les jeux Steam installes sur ce PC"),
+    _f("launch_game_steam",         "Lance un jeu Steam deja installe par son nom",      {"game_name": _s("nom du jeu")}, ["game_name"]),
+    _f("search_game_on_steam",      "Ouvre la recherche Steam Store pour un jeu",        {"game_name": _s("nom du jeu")}, ["game_name"]),
+    _f("install_game_steam",        "Cherche un jeu sur Steam Store, ouvre sa page et lance l'installation si Steam est present", {"game_name": _s("nom du jeu")}, ["game_name"]),
 ]

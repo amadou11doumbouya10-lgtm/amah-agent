@@ -32,6 +32,8 @@ YouTube : open_youtube(query) — ouvre navigateur | search_youtube(query) — c
 Vols : search_flights(from_city, to_city, date) — resultats + Google Flights
 Plan multi-etapes : create_plan(goal) — pour taches complexes 3+ actions en sequence
 Musique : play_music(query) — YouTube Music | Code : write_code/run_code/explain_code
+Jeux : open_steam/open_epic_games/list_installed_steam_games — lance launchers/liste jeux installes
+       launch_game_steam(game_name)/search_game_on_steam(game_name)/install_game_steam(game_name)
 
 Regles : Email→confirme avant envoyer | Navigateur→get_page_text apres open_browser
 Date→appelle get_datetime si besoin | Taches complexes (3+ etapes)→create_plan d'abord
