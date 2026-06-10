@@ -965,6 +965,8 @@ class AmahGUI:
         "telecharge":"internet","linkedin":"internet","google":"internet","youtube":"internet",
         "instagram":"internet","navigue":"internet",
         "page":"internet","contenu":"internet","lis-la":"internet","scrape":"internet",
+        # cartes / images cherchees en ligne (pas des fichiers locaux)
+        "carte":"internet","cartes":"internet","drapeau":"internet","drapeaux":"internet",
         # ouvrir = systeme (open_file) EN PRIORITÉ sur internet
         # L'utilisateur dit "ouvre" pour ouvrir un fichier/dossier local
         "ouvre":"systeme","ouvrir":"systeme","open":"systeme","va":"systeme","vas":"systeme",
@@ -1166,7 +1168,19 @@ class AmahGUI:
             active_model = MODEL
             self.root.after(0, self._set_status, "Amah reflechit (outils cibles)...")
 
-        response = self._groq_call(self.messages, tools=tools, model_override=active_model)
+        try:
+            response = self._groq_call(self.messages, tools=tools, model_override=active_model)
+        except Exception as e:
+            # Quand le modele tente d'appeler un outil hors de la sous-liste
+            # ciblee, Groq rejette l'appel avec une erreur 400 AVANT meme de
+            # renvoyer finish_reason="tool_calls" -- le filet ci-dessous ne
+            # peut donc jamais s'en charger. On relance avec tous les outils
+            # plutot que de remonter cette erreur a l'utilisateur.
+            if "not in request.tools" in str(e):
+                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                                           model_override=MODEL)
+            else:
+                raise
 
         # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous (70B)
         if response.choices[0].finish_reason == "tool_calls":

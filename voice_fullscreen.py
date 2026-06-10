@@ -16,6 +16,9 @@ _env = (Path(sys.executable).parent / ".env"
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
 from tools.voice import speak
+from tools import TOOL_FUNCTIONS
+from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
+from groq_client import GroqClient
 
 # ── Palette cyberpunk / HUD ──────────────────────────────────────────────────
 BG        = "#03050a"        # noir presque pur, légère teinte bleue
@@ -82,6 +85,7 @@ _WORD_TO_CAT = {
     "vois":"vision","observe":"vision","ecran":"vision","analyse":"vision",
     "mon-ecran":"vision","sur-ecran":"vision","l-ecran":"vision","regarde":"vision",
     "lire-ecran":"vision","lis-ecran":"vision","que-vois":"vision","ecrat":"vision",
+    "carte":"internet","cartes":"internet","drapeau":"internet","drapeaux":"internet",
     "vol":"flights","vols":"flights","avion":"flights","billet":"flights","voyage":"flights",
     "plan":"planner","etapes":"planner","sequence":"planner",
 }
@@ -470,14 +474,33 @@ class AmahVoiceUI:
         tools = _select_tools(text)
         model = MODEL_FULL if tools else MODEL_FAST
 
+        def _on_status(txt):
+            # Affiche les messages de rotation/attente (limite Groq) dans la
+            # zone de reponse au lieu de laisser l'ecran fige sur "TRAITEMENT".
+            self.root.after(0, self._reply_var.set, txt)
+
         def _call(msgs, tl):
             return self.client.chat(
                 messages=msgs, model=model, tools=tl,
                 max_tokens=1024, temperature=0.4,
+                on_status=_on_status,
             )
 
+        def _call_safe(msgs):
+            # Si le modele tente d'appeler un outil hors de la sous-liste
+            # ciblee, Groq rejette avec une erreur 400 : on relance avec
+            # tous les outils plutot que de remonter l'erreur.
+            nonlocal tools
+            try:
+                return _call(msgs, tools)
+            except Exception as e:
+                if "not in request.tools" in str(e) and tools is not TOOLS_DEFINITIONS:
+                    tools = TOOLS_DEFINITIONS
+                    return _call(msgs, tools)
+                raise
+
         try:
-            resp = _call(self.messages, tools)
+            resp = _call_safe(self.messages)
             while resp.choices[0].finish_reason == "tool_calls":
                 msg = resp.choices[0].message
                 self.messages.append({
@@ -497,7 +520,7 @@ class AmahVoiceUI:
                         "tool_call_id": tc.id,
                         "content": res,
                     })
-                resp = _call(self.messages, tools)
+                resp = _call_safe(self.messages)
 
             reply = resp.choices[0].message.content or "Compris."
             self.messages.append({"role": "assistant", "content": reply})

@@ -7,6 +7,7 @@ Lancement : py -3.13 amah_listener.py
 Quitter   : clic droit sur le widget → Quitter
 Backup    : Ctrl+Shift+A ouvre l'interface directement
 """
+import os
 import sys
 import math
 import time
@@ -20,6 +21,31 @@ _env = (Path(sys.executable).parent / ".env"
         if getattr(sys, "frozen", False)
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
+
+
+def _already_running() -> bool:
+    """Vérifie si une autre instance de amah_listener.py tourne déjà.
+
+    Sans ce garde-fou, un second lancement (ex: double clic sur le bouton
+    "Amah écoute") fait écouter deux instances en parallèle : si les deux
+    détectent le mot de réveil, on obtient deux interfaces vocales
+    superposées (voix dédoublée, réponses incohérentes)."""
+    try:
+        import psutil
+    except ImportError:
+        return False
+    me = os.getpid()
+    script_name = Path(__file__).name
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        if proc.info["pid"] == me:
+            continue
+        try:
+            cmdline = proc.info["cmdline"] or []
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if any(script_name in str(arg) for arg in cmdline):
+            return True
+    return False
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG       = "#03050a"
@@ -344,4 +370,12 @@ def _hex_pts(cx, cy, r, offset=0):
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    if _already_running():
+        from tkinter import messagebox
+        _root = tk.Tk()
+        _root.withdraw()
+        messagebox.showinfo("Amah",
+            "Amah écoute déjà en arrière-plan\n(widget en bas à droite de l'écran).")
+        _root.destroy()
+        sys.exit(0)
     ListenerWidget().run()
