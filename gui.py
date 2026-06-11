@@ -92,6 +92,7 @@ TOOL_LABELS = {
     "play_music":        "lecture musique",
     "search_flights":    "recherche vols",
     "create_plan":       "planification multi-etapes",
+    "execute_plan":      "execution automatique de plan",
     # Nouveaux outils v1.5
     "delete_file":       "suppression fichier",
     "summarize":         "resume document",
@@ -408,7 +409,7 @@ class AmahGUI:
             ("Meteo",         ["get_weather","get_weather_simple"]),
             ("Traduction",    ["translate","detect_language"]),
             ("QR/Clipboard",  ["create_qrcode","read_clipboard","write_clipboard"]),
-            ("Planif",        ["create_plan","create_daily_task","list_tasks",
+            ("Planif",        ["create_plan","execute_plan","create_daily_task","list_tasks",
                                "delete_task","run_task_now"]),
             ("Stats/MAJ",     ["get_stats","reset_stats","check_update",
                                "get_current_version","get_license_info"]),
@@ -919,9 +920,9 @@ class AmahGUI:
             "Jeux":        ["open_steam","open_epic_games","list_installed_steam_games",
                             "launch_game_steam","search_game_on_steam","install_game_steam"],
             "Webcam":      ["analyze_webcam","start_auto_mute","stop_auto_mute"],
-            "Planif":      ["create_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
+            "Planif":      ["create_plan","execute_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n  — 96 outils disponibles —\n\n", "dim"))
+        self._write(("\n  — 97 outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -948,6 +949,8 @@ class AmahGUI:
         self.root.after(0, self._set_status, f"Outil : {label}...")
 
         try:
+            if name == "execute_plan":
+                args["on_status"] = lambda txt: self.root.after(0, self._set_status, txt)
             result = func(**args)
             if name == "analyze_webcam" and isinstance(result, dict) and result.get("image_path"):
                 self.root.after(0, self._show_webcam_popup, result["image_path"])
@@ -1193,7 +1196,7 @@ class AmahGUI:
         "vision":    {"analyze_screen","screenshot_full"},
         "youtube":   {"open_youtube","search_youtube","play_music","open_browser","web_search"},
         "flights":   {"search_flights","web_search","open_browser"},
-        "planner":   {"create_plan"},
+        "planner":   {"create_plan","execute_plan"},
         "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
                        "launch_game_steam","search_game_on_steam","install_game_steam"},
         "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},

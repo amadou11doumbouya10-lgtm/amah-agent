@@ -108,7 +108,7 @@ _CAT_TOOLS = {
     "vision":    {"analyze_screen","screenshot_full"},
     "youtube":   {"open_youtube","search_youtube","open_browser","web_search"},
     "flights":   {"search_flights","web_search","open_browser"},
-    "planner":   {"create_plan"},
+    "planner":   {"create_plan","execute_plan"},
     "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
                    "launch_game_steam","search_game_on_steam","install_game_steam"},
     "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
@@ -519,7 +519,7 @@ class AmahVoiceUI:
                     ],
                 })
                 for tc in msg.tool_calls:
-                    res = self._run_tool(tc)
+                    res = self._run_tool(tc, on_status=_on_status)
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -533,7 +533,7 @@ class AmahVoiceUI:
         except Exception as e:
             return f"Erreur API : {e}", True
 
-    def _run_tool(self, tc) -> str:
+    def _run_tool(self, tc, on_status=None) -> str:
         try:
             args = json.loads(tc.function.arguments) or {}
         except Exception:
@@ -542,6 +542,8 @@ class AmahVoiceUI:
         if not func:
             return json.dumps({"error": f"Outil inconnu: {tc.function.name}"})
         try:
+            if tc.function.name == "execute_plan" and on_status:
+                args["on_status"] = on_status
             return json.dumps(func(**args), ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})

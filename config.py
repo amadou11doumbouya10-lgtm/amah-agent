@@ -136,6 +136,8 @@ TOOLS_DEFINITIONS = [
     _f("search_flights",  "Recherche des vols + ouvre Google Flights", {"from_city": _s("ville depart"), "to_city": _s("ville arrivee"), "date": _s("date ex: 2026-07-15")}, ["from_city","to_city"]),
     # Planificateur multi-etapes (v1.4)
     _f("create_plan",     "Genere un plan JSON multi-etapes pour une tache complexe (3+ actions)", {"goal": _s("objectif detaille")}, ["goal"]),
+    # Execution automatique de plan (v1.5)
+    _f("execute_plan",    "Genere ET execute automatiquement un plan multi-etapes (avec retry sur echec). S'arrete et demande confirmation avant une action sensible (suppression, email, etc.) -- rappeler alors avec plan_id et confirmed=true", {"goal": _s("objectif detaille (omettre si on reprend un plan)"), "plan_id": _s("id du plan en attente de confirmation"), "confirmed": _b("true pour confirmer et executer l'etape sensible en attente")}, []),
     # YouTube musique
     _f("play_music",      "Lance une recherche musicale sur YouTube Music dans le navigateur", {"query": _s("titre artiste ou genre musical")}, ["query"]),
     # Outils code (v1.5)

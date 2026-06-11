@@ -42,7 +42,7 @@ _TOOL_MODULES = [
     ("tools.youtube_tool", ["open_youtube", "search_youtube", "play_music"]),
     ("tools.code_tools", ["write_code", "run_code", "explain_code"]),
     ("tools.flight_finder", ["search_flights"]),
-    ("tools.planner", ["create_plan"]),
+    ("tools.planner", ["create_plan", "execute_plan"]),
     ("tools.games", [
         "open_steam", "open_epic_games", "list_installed_steam_games",
         "launch_game_steam", "search_game_on_steam", "install_game_steam",
