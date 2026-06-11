@@ -149,4 +149,8 @@ TOOLS_DEFINITIONS = [
     _f("launch_game_steam",         "Lance un jeu Steam deja installe par son nom",      {"game_name": _s("nom du jeu")}, ["game_name"]),
     _f("search_game_on_steam",      "Ouvre la recherche Steam Store pour un jeu",        {"game_name": _s("nom du jeu")}, ["game_name"]),
     _f("install_game_steam",        "Cherche un jeu sur Steam Store, ouvre sa page et lance l'installation si Steam est present", {"game_name": _s("nom du jeu")}, ["game_name"]),
+    # Webcam (v1.5)
+    _f("analyze_webcam",   "Capture une image via la webcam et l'analyse par IA visuelle (Groq vision)", {"question": _s("question sur ce que voit la camera")}),
+    _f("start_auto_mute",  "Active la surveillance webcam : coupe le son automatiquement si plusieurs personnes sont detectees devant la camera"),
+    _f("stop_auto_mute",   "Desactive la surveillance webcam auto-mute et retablit le son si besoin"),
 ]

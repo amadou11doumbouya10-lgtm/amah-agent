@@ -47,6 +47,8 @@ _TOOL_MODULES = [
         "open_steam", "open_epic_games", "list_installed_steam_games",
         "launch_game_steam", "search_game_on_steam", "install_game_steam",
     ]),
+    ("tools.webcam_vision", ["analyze_webcam"]),
+    ("tools.webcam_guard", ["start_auto_mute", "stop_auto_mute"]),
 ]
 
 TOOL_FUNCTIONS = {}

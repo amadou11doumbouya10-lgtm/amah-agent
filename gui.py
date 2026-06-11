@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS
 from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
+from webcam_monitor import WebcamMonitor
 
 # ── Couleurs ────────────────────────────────────────────────────────────────
 BG         = "#0D0D0B"   # fond principal
@@ -106,6 +107,10 @@ TOOL_LABELS = {
     "launch_game_steam":       "lancement jeu",
     "search_game_on_steam":    "recherche jeu Steam",
     "install_game_steam":      "installation jeu",
+    # Webcam (v1.5)
+    "analyze_webcam":    "analyse webcam",
+    "start_auto_mute":   "activation auto-mute webcam",
+    "stop_auto_mute":    "desactivation auto-mute webcam",
 }
 
 
@@ -141,6 +146,13 @@ class AmahGUI:
         self._bind_shortcuts()
         self._welcome()
         self._start_metrics()
+
+        # Auto-mute webcam (v1.5) : feedback visuel quand le son est coupe/retabli
+        # automatiquement (callbacks declenches depuis le thread de surveillance)
+        WebcamMonitor.get().set_callbacks(
+            on_pause=lambda: self.root.after(0, self._set_status, "[!] Son coupe automatiquement (plusieurs personnes detectees)", GOLD),
+            on_resume=lambda: self.root.after(0, self._set_status, "[OK] Pret"),
+        )
 
     # ── Construction de l'interface ─────────────────────────────────────────
 
@@ -385,6 +397,7 @@ class AmahGUI:
             ("Vols",          ["search_flights"]),
             ("Jeux",          ["open_steam","open_epic_games","list_installed_steam_games",
                                "launch_game_steam","search_game_on_steam","install_game_steam"]),
+            ("Webcam",        ["analyze_webcam","start_auto_mute","stop_auto_mute"]),
             ("Media/Voix",    ["speak","listen","listen_continuous",
                                "send_notification","set_reminder"]),
             ("Excel",         ["read_excel","create_excel","append_to_excel"]),
@@ -905,9 +918,10 @@ class AmahGUI:
             "Vols":        ["search_flights"],
             "Jeux":        ["open_steam","open_epic_games","list_installed_steam_games",
                             "launch_game_steam","search_game_on_steam","install_game_steam"],
+            "Webcam":      ["analyze_webcam","start_auto_mute","stop_auto_mute"],
             "Planif":      ["create_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n  — 93 outils disponibles —\n\n", "dim"))
+        self._write(("\n  — 96 outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -935,9 +949,81 @@ class AmahGUI:
 
         try:
             result = func(**args)
+            if name == "analyze_webcam" and isinstance(result, dict) and result.get("image_path"):
+                self.root.after(0, self._show_webcam_popup, result["image_path"])
             return json.dumps(result, ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    def _show_webcam_popup(self, image_path: str):
+        """Ouvre un apercu webcam en direct (avec indicateur EN DIRECT)."""
+        from tools.webcam import acquire, release, read_locked
+
+        try:
+            from PIL import Image, ImageTk
+            import cv2
+        except Exception:
+            return
+
+        cap = acquire()
+
+        win = tk.Toplevel(self.root)
+        win.title("Amah voit en direct..." if cap else "Amah voit...")
+        win.configure(bg=BG)
+        win.resizable(False, False)
+
+        if cap:
+            header = tk.Frame(win, bg=BG)
+            header.pack(fill=tk.X, padx=8, pady=(8, 0))
+            dot = tk.Canvas(header, width=10, height=10, bg=BG, highlightthickness=0, bd=0)
+            dot.create_oval(1, 1, 9, 9, fill="#E03030", outline="")
+            dot.pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(header, text="EN DIRECT", bg=BG, fg="#E03030",
+                     font=("Consolas", 9, "bold")).pack(side=tk.LEFT)
+
+        img_lbl = tk.Label(win, bg=BG)
+        try:
+            init_img = Image.open(image_path)
+            init_img.thumbnail((480, 360))
+            init_photo = ImageTk.PhotoImage(init_img)
+            img_lbl.configure(image=init_photo)
+            img_lbl.image = init_photo
+        except Exception:
+            pass
+        img_lbl.pack(padx=8, pady=8)
+
+        def _on_close():
+            if cap:
+                release()
+            win.destroy()
+
+        tk.Button(win, text="Fermer", command=_on_close, bg=BG3, fg=GOLD,
+                  font=("Consolas", 9), relief=tk.FLAT, padx=10, pady=3,
+                  activebackground=BG4).pack(pady=(0, 8))
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        if not cap:
+            win.after(15000, win.destroy)
+            return
+
+        def _update_frame():
+            if not win.winfo_exists():
+                return
+            try:
+                frame = read_locked()
+                if frame is not None:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(rgb)
+                    img.thumbnail((480, 360))
+                    photo = ImageTk.PhotoImage(img)
+                    img_lbl.configure(image=photo)
+                    img_lbl.image = photo
+            except Exception:
+                pass
+            win.after(100, _update_frame)
+
+        win.after(60000, _on_close)  # coupure auto apres 60s (vie privee)
+        win.after(100, _update_frame)
 
     # Mots clés → catégorie d'outils (élargi pour couvrir un maximum de cas)
     _WORD_TO_CAT = {
@@ -1082,6 +1168,9 @@ class AmahGUI:
         # jeux Steam/Epic (v1.5)
         "steam":"jeux","epic":"jeux","epicgames":"jeux","jeu":"jeux","jeux":"jeux",
         "gamer":"jeux","videogame":"jeux","installe-jeu":"jeux","demarre-jeu":"jeux",
+        # webcam (v1.5)
+        "webcam":"webcam","camera":"webcam","cam":"webcam","auto-mute":"webcam",
+        "automute":"webcam",
     }
 
     # Catégories → noms d'outils inclus
@@ -1107,6 +1196,7 @@ class AmahGUI:
         "planner":   {"create_plan"},
         "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
                        "launch_game_steam","search_game_on_steam","install_game_steam"},
+        "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
     }
 
     def _select_tools(self, message: str):

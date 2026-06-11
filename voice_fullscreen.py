@@ -89,6 +89,7 @@ _WORD_TO_CAT = {
     "vol":"flights","vols":"flights","avion":"flights","billet":"flights","voyage":"flights",
     "plan":"planner","etapes":"planner","sequence":"planner",
     "steam":"jeux","epic":"jeux","jeu":"jeux","jeux":"jeux",
+    "webcam":"webcam","camera":"webcam","cam":"webcam","auto-mute":"webcam","automute":"webcam",
 }
 
 _CAT_TOOLS = {
@@ -110,6 +111,7 @@ _CAT_TOOLS = {
     "planner":   {"create_plan"},
     "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
                    "launch_game_steam","search_game_on_steam","install_game_steam"},
+    "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
 }
 
 def _select_tools(message: str):
