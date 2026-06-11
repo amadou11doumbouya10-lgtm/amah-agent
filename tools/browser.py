@@ -85,6 +85,52 @@ def take_screenshot(path: str = None) -> dict:
         return {"error": str(e)}
 
 
+def click_text(text: str) -> dict:
+    """Clique sur l'element (bouton, lien, texte) correspondant au texte visible donne -- pas besoin de selecteur CSS."""
+    try:
+        page = _ensure_browser()
+        strategies = [
+            lambda: page.get_by_role("button", name=text, exact=False),
+            lambda: page.get_by_role("link", name=text, exact=False),
+            lambda: page.get_by_text(text, exact=False),
+            lambda: page.get_by_label(text, exact=False),
+        ]
+        for strat in strategies:
+            try:
+                locator = strat().first
+                locator.wait_for(state="visible", timeout=3000)
+                locator.click(timeout=5000)
+                page.wait_for_load_state("domcontentloaded")
+                return {"success": True, "clique": text, "url": page.url}
+            except Exception:
+                continue
+        return {"error": f"Aucun element cliquable trouve pour : '{text}'"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def type_in_field(label: str, text: str) -> dict:
+    """Ecrit du texte dans un champ identifie par son label/placeholder/nom -- pas besoin de selecteur CSS."""
+    try:
+        page = _ensure_browser()
+        strategies = [
+            lambda: page.get_by_label(label, exact=False),
+            lambda: page.get_by_placeholder(label, exact=False),
+            lambda: page.get_by_role("textbox", name=label, exact=False),
+        ]
+        for strat in strategies:
+            try:
+                locator = strat().first
+                locator.wait_for(state="visible", timeout=3000)
+                locator.fill(text, timeout=5000)
+                return {"success": True, "champ": label, "valeur": text}
+            except Exception:
+                continue
+        return {"error": f"Aucun champ trouve pour : '{label}'"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def get_page_text() -> dict:
     try:
         page = _ensure_browser()

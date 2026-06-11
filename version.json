@@ -1,5 +1,5 @@
 {
-  "version": "1.4.2",
-  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.4.2/Amah-Agent.exe",
-  "notes": "v1.4.2 : streaming des reponses simples, GroqClient centralise (rotation de cles partagee), fix placeholder chat qui restait affiche, fix modele vision decommissionne, voix synchrone avec vraies erreurs"
+  "version": "1.5.0",
+  "url": "https://github.com/amadou11doumbouya10-lgtm/amah-agent/releases/download/v1.5.0/Amah-Agent.exe",
+  "notes": "v1.5.0 : 99 outils (lanceur de jeux Steam/Epic, vision webcam + auto-mute confidentialite, execute_plan automatique, navigation web par texte visible click_text/type_in_field), et nouveau mode vocal temps reel Live (Gemini, touche F9) avec interruption naturelle et 33 outils."
 }

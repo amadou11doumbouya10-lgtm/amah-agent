@@ -1,14 +1,15 @@
-# Amah Agent — Toutes les capacités (v1.4.2)
+# Amah Agent — Toutes les capacités (v1.5.0)
 
-> **79 outils réels** • Fonctionne hors ligne • Windows 11 • Mis à jour le 07/06/2026
+> **99 outils réels** • Fonctionne hors ligne (sauf IA/web/email) • Windows 11 • Mis à jour le 11/06/2026
 
 ---
 
 ## Vue d'ensemble
 
 Amah Agent est une assistante IA locale qui s'exécute directement sur ton PC Windows.
-Elle comprend le français naturel et peut agir sur ton ordinateur via 79 outils réels,
-regroupés en 14 catégories.
+Elle comprend le français naturel et peut agir sur ton ordinateur via 99 outils réels,
+regroupés en 24 catégories. Depuis la v1.5, elle dispose aussi d'un **mode Live**
+(Gemini) pour une conversation vocale en temps réel, comme un appel téléphonique.
 
 **Exemples de phrases :**
 - *"Organise mon bureau"*
@@ -16,10 +17,12 @@ regroupés en 14 catégories.
 - *"Cherche le prix des vols Paris → New York pour le 20 juillet"*
 - *"Règle le volume à 40%"*
 - *"Qu'est-ce que tu vois sur mon écran ?"*
+- *"Lance Steam et installe Hollow Knight"*
+- *"Clique sur Connexion puis écris mon email dans le champ Adresse"*
 
 ---
 
-## 1. Fichiers et Dossiers — 10 outils
+## 1. Fichiers et Dossiers — 12 outils
 
 Amah peut lire, créer, déplacer, modifier et organiser tous tes fichiers.
 
@@ -35,6 +38,8 @@ Amah peut lire, créer, déplacer, modifier et organiser tous tes fichiers.
 | `edit_file` | Remplace un texte dans un fichier existant | *"Dans script.py, remplace 'version=1' par 'version=2'"* |
 | `edit_pdf` | **Modifie du texte dans un PDF en gardant la mise en page** | *"Dans recu.pdf, remplace 'Jean Dupont' par 'Mohamed Kaba'"* |
 | `get_folder_info` | Statistiques d'un dossier (taille, nombre de fichiers, types) | *"Quelle est la taille de mon dossier Vidéos ?"* |
+| `delete_file` | Supprime définitivement un fichier ou dossier | *"Supprime le fichier brouillon.txt"* |
+| `summarize` | Résume un fichier (PDF, Word, texte ou code) par IA | *"Résume-moi ce rapport.pdf"* |
 
 ---
 
@@ -51,7 +56,7 @@ Amah crée des documents professionnels prêts à l'emploi.
 
 ---
 
-## 3. Internet et Navigation — 7 outils
+## 3. Internet et Navigation — 9 outils
 
 Amah peut naviguer sur le web, lire des pages, remplir des formulaires.
 
@@ -60,14 +65,18 @@ Amah peut naviguer sur le web, lire des pages, remplir des formulaires.
 | `web_search` | Recherche sur DuckDuckGo (sans tracking) | *"Cherche le cours du Bitcoin aujourd'hui"* |
 | `read_webpage` | Lit le texte d'une page web depuis son URL | *"Lis-moi cet article : [url]"* |
 | `open_browser` | Ouvre une URL dans Chrome | *"Ouvre youtube.com"* |
-| `click_element` | Clique sur un bouton ou lien de la page | *"Clique sur le bouton Connexion"* |
-| `fill_form` | Remplit un champ de formulaire | *"Entre 'Paris' dans le champ de recherche"* |
+| `click_element` | Clique sur un bouton ou lien via sélecteur CSS (technique) | *"Clique sur #login-button"* |
+| `fill_form` | Remplit un champ via sélecteur CSS (technique) | *"Entre 'Paris' dans #search"* |
 | `take_screenshot` | Capture l'écran du navigateur | *"Prends une capture de cette page"* |
 | `get_page_text` | Extrait tout le texte de la page ouverte | *"Lis-moi ce qui est écrit sur cette page"* |
+| `click_text` | **Clique sur un élément par son texte visible** — sans CSS | *"Clique sur Connexion"* |
+| `type_in_field` | **Écrit dans un champ par son label/placeholder** — sans CSS | *"Écris mon email dans le champ Adresse"* |
+
+> `click_text` et `type_in_field` permettent de naviguer "comme un humain", à voix haute.
 
 ---
 
-## 4. Email Gmail — 3 outils
+## 4. Email Gmail — 4 outils
 
 Amah lit et envoie des emails depuis le compte Gmail configuré.
 
@@ -76,12 +85,13 @@ Amah lit et envoie des emails depuis le compte Gmail configuré.
 | `read_emails` | Lit les N derniers emails (expéditeur, sujet, extrait) | *"Lis mes 5 derniers emails"* |
 | `send_email` | Envoie un email | *"Envoie un email à paul@gmail.com, sujet Réunion, corps : Bonjour…"* |
 | `search_emails` | Cherche dans la boîte Gmail | *"Cherche les emails de Google"* |
+| `draft_email` | Prépare un brouillon à valider avant envoi | *"Prépare un email à Paul mais ne l'envoie pas"* |
 
 > Amah demande toujours confirmation avant d'envoyer un email.
 
 ---
 
-## 5. Système Windows — 5 outils
+## 5. Système Windows — 6 outils
 
 Amah surveille et contrôle ton PC.
 
@@ -92,6 +102,7 @@ Amah surveille et contrôle ton PC.
 | `run_command` | Exécute une commande PowerShell (sécurisée) | *"Liste les processus qui consomment le plus de CPU"* |
 | `list_processes` | Affiche les processus actifs triés par utilisation CPU | *"Qu'est-ce qui ralentit mon PC ?"* |
 | `get_network_info` | Adresse IP locale et test de connexion internet | *"Quelle est mon adresse IP ?"* |
+| `kill_process` | Termine un processus (protège les processus système critiques) | *"Ferme le processus chrome.exe"* |
 
 ---
 
@@ -122,12 +133,13 @@ Amah peut voir et analyser ton écran grâce à l'IA vision de Groq.
 
 ---
 
-## 8. YouTube — 2 outils *(nouveau v1.4)*
+## 8. YouTube et Musique — 3 outils *(nouveau v1.4 / v1.5)*
 
 | Outil | Ce qu'il fait | Exemple |
 |---|---|---|
 | `open_youtube` | Ouvre YouTube avec une recherche dans Chrome | *"Mets une musique relaxante sur YouTube"* |
 | `search_youtube` | Cherche des vidéos YouTube sans ouvrir le navigateur | *"Cherche des tutoriels Python sur YouTube"* |
+| `play_music` | Lance directement une musique sur YouTube Music | *"Joue Bohemian Rhapsody"* |
 
 ---
 
@@ -171,6 +183,15 @@ Amah se souvient d'informations entre les sessions.
 - **Dis simplement "Amah"** → l'interface plein écran apparaît automatiquement
 - Clic droit sur le widget → menu (ouvrir / quitter)
 - Déplaçable par glisser-déposer
+
+**🆕 Mode Live temps réel (Gemini)** — touche **F9** depuis l'interface plein écran :
+- HUD violet "MODE LIVE · GEMINI"
+- Conversation vraiment en temps réel (comme un appel téléphonique), avec
+  interruption naturelle si tu coupes la parole d'Amah
+- Amah peut utiliser 33 outils pendant la conversation (web, navigateur,
+  email, météo, mémoire, hardware, musique...)
+- Nécessite une clé `GEMINI_API_KEY` gratuite dans `.env`
+- Re-appuie sur F9 pour revenir au mode normal (Groq)
 
 ---
 
@@ -260,11 +281,12 @@ Les tâches s'exécutent même quand Amah est fermée.
 
 ---
 
-## 20. Planification IA — 1 outil *(nouveau v1.4)*
+## 20. Planification IA — 2 outils *(nouveau v1.4 / v1.5)*
 
 | Outil | Ce qu'il fait | Exemple |
 |---|---|---|
-| `create_plan` | Génère un plan multi-étapes pour une tâche complexe | *"Planifie comment créer et envoyer mon rapport mensuel"* |
+| `create_plan` | Génère un plan multi-étapes pour une tâche complexe (sans l'exécuter) | *"Planifie comment créer et envoyer mon rapport mensuel"* |
+| `execute_plan` | **Génère ET exécute** automatiquement un plan, avec retry et confirmation avant les actions sensibles | *"Crée et envoie le rapport mensuel à mon équipe"* |
 
 ---
 
@@ -280,16 +302,56 @@ Les tâches s'exécutent même quand Amah est fermée.
 
 ---
 
+## 22. Jeux — 6 outils *(nouveau v1.5)*
+
+Amah peut lancer Steam/Epic Games et installer des jeux.
+
+| Outil | Ce qu'il fait | Exemple |
+|---|---|---|
+| `open_steam` / `open_epic_games` | Lance les launchers Steam / Epic Games | *"Ouvre Steam"* |
+| `list_installed_steam_games` | Liste les jeux Steam installés | *"Quels jeux ai-je sur Steam ?"* |
+| `launch_game_steam` | Lance un jeu Steam déjà installé | *"Lance Hollow Knight"* |
+| `search_game_on_steam` | Ouvre la fiche Steam Store d'un jeu | *"Cherche Elden Ring sur Steam"* |
+| `install_game_steam` | Cherche, ouvre et lance l'installation d'un jeu | *"Installe Stardew Valley"* |
+
+---
+
+## 23. Code — 3 outils *(nouveau v1.5)*
+
+Amah peut écrire, exécuter et expliquer du code.
+
+| Outil | Ce qu'il fait | Exemple |
+|---|---|---|
+| `write_code` | Écrit du code dans un fichier (Python, JS, HTML…) | *"Écris un script Python qui renomme mes fichiers"* |
+| `run_code` | Exécute un fichier Python ou JavaScript | *"Lance ce script.py"* |
+| `explain_code` | Lit et explique un fichier de code | *"Explique-moi ce que fait main.py"* |
+
+---
+
+## 24. Vision Webcam et Confidentialité — 3 outils *(nouveau v1.5)*
+
+Amah peut voir via la webcam — désactivé par défaut pour la vie privée.
+
+| Outil | Ce qu'il fait | Exemple |
+|---|---|---|
+| `analyze_webcam` | Capture la webcam et l'analyse par IA, avec aperçu live "EN DIRECT" | *"Regarde-moi avec la webcam, qu'est-ce que tu vois ?"* |
+| `start_auto_mute` | Surveille la webcam et coupe le son si 2+ personnes détectées | *"Active la surveillance de confidentialité"* |
+| `stop_auto_mute` | Désactive cette surveillance | *"Arrête la surveillance webcam"* |
+
+---
+
 ## Limites à connaître
 
 | Limite | Détail |
 |---|---|
+| **Mode Live (Gemini)** | Nécessite une clé `GEMINI_API_KEY` valide dans `.env` (gratuite sur Google AI Studio) et un micro/haut-parleurs fonctionnels. |
 | **PDF complexes** | `edit_pdf` peut modifier du texte simple. Les PDFs avec champs de formulaire interactifs ou texte vectoriel peuvent résister. |
-| **Tokens Groq** | ~3 000 tokens par échange après optimisation. ~7 000 échanges/jour sur compte gratuit. |
-| **Reconnaissance vocale** | Nécessite un micro. Fonctionne hors ligne via Windows Speech API. |
+| **Tokens Groq** | ~1 500 tokens par échange après optimisation, ~200 appels/jour avec 3 clés en rotation. |
+| **Reconnaissance vocale** | Nécessite un micro. Le mode normal utilise l'API Google Speech (connexion internet requise). |
 | **Navigateur** | Nécessite Chromium installé via `installer_navigateur.bat`. |
 | **WiFi toggle** | Nécessite les droits administrateur sur certains PC. |
 | **Luminosité** | Fonctionne sur écrans intégrés (laptop). Peut ne pas fonctionner sur certains moniteurs externes. |
+| **Webcam** | `analyze_webcam`/`start_auto_mute` nécessitent une webcam et sont désactivés par défaut (vie privée). |
 
 ---
 
@@ -297,14 +359,14 @@ Les tâches s'exécutent même quand Amah est fermée.
 
 | Catégorie | Nombre d'outils |
 |---|---|
-| Fichiers et dossiers | 10 |
+| Fichiers et dossiers | 12 |
 | Documents (Word, PDF, TXT) | 4 |
-| Internet et navigation | 7 |
-| Email Gmail | 3 |
-| Système Windows | 5 |
+| Internet et navigation | 9 |
+| Email Gmail | 4 |
+| Système Windows | 6 |
 | Hardware (volume, luminosité, WiFi) | 6 |
 | Vision IA (analyse d'écran) | 1 |
-| YouTube | 2 |
+| YouTube et musique | 3 |
 | Vols et voyages | 1 |
 | Mémoire persistante | 3 |
 | Voix | 3 |
@@ -316,10 +378,13 @@ Les tâches s'exécutent même quand Amah est fermée.
 | Traduction | 2 |
 | QR Code | 1 |
 | Planificateur Windows | 4 |
-| Planification IA | 1 |
+| Planification IA | 2 |
 | Statistiques et système Amah | 5 |
-| **TOTAL** | **79** |
+| Jeux | 6 |
+| Code | 3 |
+| Vision webcam et confidentialité | 3 |
+| **TOTAL** | **99** |
 
 ---
 
-*Amah Agent v1.4.1 — contact.amah.officiel@gmail.com*
+*Amah Agent v1.5.0 — contact.amah.officiel@gmail.com*

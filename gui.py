@@ -69,6 +69,8 @@ TOOL_LABELS = {
     "fill_form":         "formulaire",
     "take_screenshot":   "capture ecran",
     "get_page_text":     "lecture page web",
+    "click_text":        "clic sur texte",
+    "type_in_field":     "saisie champ",
     "speak":             "synthese vocale",
     "send_notification": "notification",
     "set_reminder":      "rappel programme",
@@ -385,7 +387,8 @@ class AmahGUI:
                                "edit_pdf","delete_file","get_folder_info","summarize"]),
             ("Documents",     ["create_word","create_pdf","create_txt","read_document"]),
             ("Internet",      ["web_search","read_webpage","open_browser","click_element",
-                               "fill_form","get_page_text","take_screenshot"]),
+                               "fill_form","get_page_text","take_screenshot",
+                               "click_text","type_in_field"]),
             ("Email",         ["read_emails","send_email","search_emails","draft_email"]),
             ("Systeme",       ["get_system_info","open_file","run_command",
                                "list_processes","get_network_info","kill_process"]),
@@ -906,7 +909,8 @@ class AmahGUI:
                             "edit_pdf","delete_file","get_folder_info","summarize"],
             "Documents":   ["create_word","create_txt","create_pdf","read_document"],
             "Internet":    ["web_search","read_webpage","open_browser","click_element",
-                            "fill_form","take_screenshot","get_page_text"],
+                            "fill_form","take_screenshot","get_page_text",
+                            "click_text","type_in_field"],
             "Email":       ["read_emails","send_email","search_emails","draft_email"],
             "Systeme":     ["get_system_info","open_file","run_command",
                             "list_processes","get_network_info","kill_process"],
@@ -922,7 +926,7 @@ class AmahGUI:
             "Webcam":      ["analyze_webcam","start_auto_mute","stop_auto_mute"],
             "Planif":      ["create_plan","execute_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n  — 97 outils disponibles —\n\n", "dim"))
+        self._write(("\n  — 99 outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -1180,7 +1184,7 @@ class AmahGUI:
     _CAT_TOOLS = {
         "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
         "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf","summarize"},
-        "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text"},
+        "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
         "email":     {"read_emails","send_email","search_emails","draft_email"},
         "memoire":   {"save_memory","get_memories","delete_memory"},
         "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},

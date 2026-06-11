@@ -15,7 +15,7 @@ _TOOL_MODULES = [
     ("tools.system", ["get_system_info", "open_file", "run_command", "kill_process"]),
     ("tools.memory", ["save_memory", "get_memories", "delete_memory"]),
     ("tools.email_tool", ["read_emails", "send_email", "search_emails", "draft_email"]),
-    ("tools.browser", ["open_browser", "click_element", "fill_form", "take_screenshot", "get_page_text"]),
+    ("tools.browser", ["open_browser", "click_element", "fill_form", "take_screenshot", "get_page_text", "click_text", "type_in_field"]),
     ("tools.voice", ["speak"]),
     ("tools.notifications", ["send_notification", "set_reminder"]),
     ("tools.excel", ["read_excel", "create_excel", "append_to_excel"]),

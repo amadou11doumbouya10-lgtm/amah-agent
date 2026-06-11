@@ -1,17 +1,23 @@
 # Amah Agent Local
 
 ## Présentation
-Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit). 79 outils réels.
+Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit) + mode vocal
+temps réel Gemini Live. 99 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
-Version actuelle : **v1.4.2**
+Version actuelle : **v1.5.0**
 
 ## Structure
 ```
 amah-agent/
 ├── agent.py                  ← Interface terminal (Rich, couleurs or/sombre)
 ├── gui.py                    ← Interface graphique tkinter (écran config + chat)
-├── config.py                 ← Modèle, système prompt, 65 définitions outils
+├── voice_fullscreen.py       ← Interface vocale plein écran (HUD, mode normal + mode Live F9)
+├── amah_listener.py          ← Mot de réveil "Amah" (widget discret, lance voice_fullscreen)
+├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés)
+├── gemini_tools.py           ← Sous-ensemble 33 outils + adaptateur schema pour Gemini Live
+├── gemini_client.py          ← Session Gemini Live (audio temps réel + function calling)
+├── config.py                 ← Modèle, système prompt, 99 définitions outils
 ├── create_shortcut.py        ← Crée le raccourci .lnk sur le bureau
 ├── amah_memory.db            ← Base SQLite mémoire persistante (auto-créée)
 ├── amah.spec                 ← Spec PyInstaller pour le packaging .exe
@@ -27,7 +33,7 @@ amah-agent/
 ├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
 ├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
-│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (65 outils)
+│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (99 outils)
 │   ├── files.py              ← Gestion fichiers/dossiers (7 outils)
 │   ├── documents.py          ← Création Word/PDF/TXT, lecture (4 outils)
 │   ├── search.py             ← Recherche DuckDuckGo + lecture page web (2 outils)
@@ -49,7 +55,16 @@ amah-agent/
 │   ├── scheduler.py          ← Planificateur Windows (4 outils)
 │   ├── stats.py              ← Statistiques d'usage (2 outils)
 │   ├── updater.py            ← Mises à jour automatiques (2 outils)
-│   └── license.py            ← Système de licence offline (1 outil)
+│   ├── license.py            ← Système de licence offline (1 outil)
+│   ├── computer_settings.py  ← Contrôle matériel : volume/luminosité/wifi (6 outils)
+│   ├── screen_vision.py      ← Analyse écran par IA vision (1 outil)
+│   ├── youtube_tool.py       ← YouTube + musique (3 outils)
+│   ├── code_tools.py         ← Écriture/exécution/explication de code (3 outils)
+│   ├── flight_finder.py      ← Recherche de vols (1 outil)
+│   ├── planner.py            ← Plans IA multi-étapes + exécution auto (2 outils)
+│   ├── games.py              ← Lanceur Steam/Epic Games (6 outils)
+│   ├── webcam_vision.py      ← Analyse webcam par IA vision (1 outil)
+│   └── webcam_guard.py       ← Auto-mute confidentialité webcam (2 outils)
 ├── developpeur/              ← Documentation technique interne
 │   ├── README_DEVELOPPEUR.md
 │   ├── GUIDE_LICENCE.md
@@ -62,7 +77,7 @@ amah-agent/
 ├── analyse-ia/               ← Briefs pour analyse externe par d'autres IA
 ├── voix/                     ← Scripts et fichiers vidéos de présentation
 ├── dist/                     ← Dossier de distribution (généré par build.bat)
-│   ├── Amah Agent.exe        (125 Mo, standalone, 65 outils, logo hexagone)
+│   ├── Amah Agent.exe        (125 Mo, standalone, 99 outils, logo hexagone)
 │   ├── .env                  (Gmail pré-configuré, Groq à renseigner)
 │   ├── installer_navigateur.bat
 │   └── GUIDE_INSTALLATION.md
@@ -107,9 +122,10 @@ build.bat                                 # compiler le .exe pour distribution
 - **Tâches avec outils** : `llama-3.3-70b-versatile` (~2s)
 - Défini dans gui.py → `_chat()` + constante `MODEL` dans config.py
 
-## Les 65 outils
-### Fichiers — tools/files.py (7)
-list_files, organize_folder, find_files, move_file, create_folder, read_file, get_folder_info
+## Les 99 outils
+### Fichiers — tools/files.py (12)
+list_files, organize_folder, find_files, move_file, create_folder, read_file,
+write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
 
 ### Documents — tools/documents.py (4)
 create_word, create_txt, create_pdf, read_document
@@ -117,19 +133,20 @@ create_word, create_txt, create_pdf, read_document
 ### Recherche — tools/search.py (2)
 web_search (DuckDuckGo + cache LRU 10min), read_webpage
 
-### Système — tools/system.py (3)
-get_system_info, open_file, run_command (PowerShell sécurisé)
+### Système — tools/system.py (4)
+get_system_info, open_file, run_command (PowerShell sécurisé), kill_process
 
 ### Mémoire — tools/memory.py (3)
 save_memory(content, category), get_memories(category), delete_memory(memory_id)
 
-### Email — tools/email_tool.py (3)
-read_emails(n), send_email(to, subject, body), search_emails(query)
+### Email — tools/email_tool.py (4)
+read_emails(n), send_email(to, subject, body), search_emails(query), draft_email(to, subject, body)
 Auth : SMTP/IMAP + mot de passe application. Tri par date UTC + priorité emails perso.
 
-### Navigateur — tools/browser.py (5)
+### Navigateur — tools/browser.py (7)
 open_browser(url), click_element(selector), fill_form(selector, value),
-take_screenshot(path), get_page_text()
+take_screenshot(path), get_page_text(), click_text(texte), type_in_field(label, texte)
+Les deux derniers ciblent par texte/label visible — pas de sélecteur CSS requis.
 
 ### Voix — tools/voice.py (1)
 speak(text, speed)
@@ -167,7 +184,7 @@ create_qrcode(text, output, size)
 ### Reconnaissance vocale — tools/voice_recognition.py (2)
 listen(timeout, language), listen_continuous(duration, language)
 
-### Planificateur — tools/scheduler.py (4)
+### Planificateur Windows — tools/scheduler.py (4)
 create_daily_task(name, command, hour, minute), list_tasks(),
 delete_task(name), run_task_now(name)
 
@@ -179,6 +196,35 @@ check_update(), get_current_version()
 
 ### Licence — tools/license.py (1)
 get_license_info()
+
+### Matériel (hardware) — tools/computer_settings.py (6)
+set_volume, get_audio_level, mute_audio, set_brightness, get_brightness, wifi_toggle
+
+### Vision écran — tools/screen_vision.py (1)
+analyze_screen (Groq vision : meta-llama/llama-4-scout-17b-16e-instruct)
+
+### YouTube et musique — tools/youtube_tool.py (3)
+open_youtube, search_youtube, play_music
+
+### Code — tools/code_tools.py (3)
+write_code, run_code, explain_code
+
+### Vols — tools/flight_finder.py (1)
+search_flights (DuckDuckGo + Google Flights)
+
+### Planification IA — tools/planner.py (2)
+create_plan (génère un plan JSON multi-étapes), execute_plan (génère ET exécute
+chaque étape, retry via Groq sur échec, confirmation avant action sensible)
+
+### Jeux — tools/games.py (6)
+open_steam, open_epic_games, list_installed_steam_games,
+launch_game_steam, search_game_on_steam, install_game_steam
+
+### Vision webcam — tools/webcam_vision.py (1)
+analyze_webcam (capture + analyse Groq vision, aperçu live "EN DIRECT")
+
+### Confidentialité webcam — tools/webcam_guard.py (2)
+start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 
 ## Architecture mémoire (amah_memory.db)
 - Table conversations : historique auto de chaque échange (session_id, role, content)
@@ -204,7 +250,28 @@ get_license_info()
 - Lance avec : py -3.13 gui.py
 - Écran de configuration premier lancement (3 clés Groq + licence + Gmail)
 - Horodatage, outils affichés après réponse, barre état, multi-ligne
-- v1.3.0 visible sur tous les écrans
+- Monitoring CPU/RAM temps réel, machine à écrire, bouton [+] pièce jointe
+- Bouton "⬡ Amah écoute" dans l'en-tête
+
+### Interface vocale plein écran (voice_fullscreen.py)
+- HUD futuriste (hexagone cyan animé, radar, barres audio)
+- Boucle écoute → réponse → synthèse vocale entièrement automatique
+- F11 : plein écran/fenêtré, Échap ou "ferme" : quitter
+
+### Mot de réveil "Amah" (amah_listener.py)
+- Widget discret en bas à droite, détection par distance de Levenshtein
+- Dire "Amah" lance automatiquement voice_fullscreen.py
+
+### 🆕 Mode Live temps réel (Gemini, touche F9 dans voice_fullscreen.py)
+- Bascule HUD violet "MODE LIVE · GEMINI"
+- Connexion bidirectionnelle audio (gemini-2.5-flash-native-audio-latest,
+  response_modalities=AUDIO, fr-FR)
+- gemini_client.py : pont microphone (16kHz) <-> haut-parleurs (24kHz) via
+  sounddevice + asyncio, exécution d'outils via run_in_executor
+- gemini_tools.py : sous-ensemble de 33 outils "vocal-friendly" + adaptateur
+  parameters_json_schema
+- Interruption naturelle (l'utilisateur peut couper la parole d'Amah)
+- Nécessite GEMINI_API_KEY dans .env (gratuite sur Google AI Studio)
 
 ## Système de licence
 - Offline HMAC-SHA256 lié au Machine UUID Windows
@@ -290,6 +357,38 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
 - [x] Routeur (SIMPLE_PATTERNS) corrigé pour laisser passer les vraies
   questions factuelles vers le 70B + web_search au lieu de les confondre avec
   des phrases sociales
+
+## Etat — v1.5.0 (11/06/2026)
+- [x] **Lanceur de jeux** (tools/games.py, 6 outils) : open_steam,
+  open_epic_games, list_installed_steam_games, launch_game_steam,
+  search_game_on_steam, install_game_steam — détection via registre
+  Windows, fichiers .acf et protocoles steam:// / com.epicgames.launcher://
+- [x] **Vision webcam + confidentialité** (tools/webcam_vision.py,
+  tools/webcam_guard.py, tools/webcam.py, 3 outils) : analyze_webcam
+  (capture + analyse Groq vision, aperçu live "EN DIRECT"),
+  start_auto_mute/stop_auto_mute (coupe le son si 2+ personnes détectées
+  par la webcam pendant 3s, vie privée — désactivé par défaut)
+- [x] **execute_plan** (tools/planner.py) : create_plan générait déjà un
+  plan JSON, execute_plan le génère ET l'exécute étape par étape, avec
+  retry via Groq en cas d'échec et confirmation obligatoire avant toute
+  action sensible (run_command/kill_process/delete_file/wifi_toggle/
+  start_auto_mute/send_email) — reprise via plan_id + confirmed=true
+- [x] **Navigation web "comme un humain"** (tools/browser.py) :
+  click_text(texte) et type_in_field(label, texte) ciblent les éléments
+  par texte visible/label/placeholder via les locators accessibles
+  Playwright (get_by_role/get_by_text/get_by_label/get_by_placeholder),
+  sans sélecteur CSS — utilisables à voix haute
+- [x] **Mode Live temps réel (Gemini)** — nouveau deuxième cerveau pour
+  une vraie conversation orale (comme un appel) :
+  - gemini_tools.py : sous-ensemble de 33 outils + adaptateur de schéma
+    JSON (parameters_json_schema)
+  - gemini_client.py : GeminiLiveSession, pont audio sounddevice/asyncio
+    (micro 16kHz -> Gemini, Gemini -> haut-parleurs 24kHz), exécution des
+    outils demandés par le modèle, interruption naturelle
+  - voice_fullscreen.py : touche F9 bascule HUD violet "MODE LIVE · GEMINI",
+    micro classique libéré proprement pendant le mode Live
+  - GEMINI_API_KEY dans .env / .env.example
+- [x] **99 outils au total**, documentés dans docs/CAPACITES_AMAH.md
 
 ## Prochaines améliorations possibles
 - [ ] Licence entreprise volume (une clé pour N postes)

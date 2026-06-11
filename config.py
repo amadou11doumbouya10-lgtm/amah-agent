@@ -72,6 +72,8 @@ TOOLS_DEFINITIONS = [
     _f("fill_form",       "Remplit champ formulaire",           {"selector": _s("selecteur"), "value": _s("valeur")}, ["selector","value"]),
     _f("take_screenshot", "Capture ecran navigateur",           {"path": _s("chemin")}),
     _f("get_page_text",   "Lit texte de la page ouverte"),
+    _f("click_text",      "Clique sur un element par son texte visible (bouton, lien...) -- pas de selecteur CSS requis", {"text": _s("texte visible de l'element a cliquer")}, ["text"]),
+    _f("type_in_field",   "Ecrit du texte dans un champ par son label/placeholder -- pas de selecteur CSS requis", {"label": _s("label, placeholder ou nom du champ"), "text": _s("texte a saisir")}, ["label","text"]),
     # Voix
     _f("speak",           "Parle a voix haute",                 {"text": _s("texte"), "speed": _i("vitesse")}, ["text"]),
     _f("listen",          "Ecoute microphone",                  {"timeout": _i("secondes"), "language": _s("langue")}),

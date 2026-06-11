@@ -20,6 +20,8 @@ from tools import TOOL_FUNCTIONS
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from groq_client import GroqClient
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 # ── Palette cyberpunk / HUD ──────────────────────────────────────────────────
 BG        = "#03050a"        # noir presque pur, légère teinte bleue
 GRID      = "#0a1020"        # grille de fond
@@ -34,12 +36,15 @@ WHITE     = "#e8f4ff"
 DIM       = "#1a2535"
 TEXT_BODY = "#a0c8e0"
 
+LIVE_COLOR = "#b388ff"   # violet -- mode Live Gemini
+
 STATES = {
     "IDLE":   (CYAN_DIM,  "AMAH  ·  EN ATTENTE"),
     "ECOUTE": (CYAN,      "ECOUTE..."),
     "PENSE":  (GOLD,      "TRAITEMENT  ·  IA"),
     "REPOND": (GREEN,     "REPOND"),
     "ERREUR": (RED,       "ERREUR"),
+    "LIVE":   (LIVE_COLOR,"MODE LIVE  ·  GEMINI"),
 }
 
 STOP_WORDS = {
@@ -95,7 +100,7 @@ _WORD_TO_CAT = {
 _CAT_TOOLS = {
     "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info"},
     "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf"},
-    "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text"},
+    "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
     "email":     {"read_emails","send_email","search_emails"},
     "memoire":   {"save_memory","get_memories","delete_memory"},
     "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info"},
@@ -164,6 +169,10 @@ class AmahVoiceUI:
         self._mic_error = ""      # raison de l'échec d'init, affichée à l'utilisateur
         self._sr = None
         self._mic = None
+        self._listening_active = threading.Event()  # micro Groq ouvert (with self._mic)
+
+        self._live_mode    = False  # True pendant le mode Live (Gemini, audio temps reel)
+        self._live_session = None
 
         self._build()
         self._grid_img = self._make_grid(self._W, self._H)  # grille pré-rendue 1×
@@ -180,6 +189,7 @@ class AmahVoiceUI:
         self.root.attributes("-fullscreen", True)
         self.root.bind("<Escape>", lambda e: self._quit())
         self.root.bind("<F11>",    lambda e: self._toggle_fs())
+        self.root.bind("<F9>",     lambda e: self._toggle_live())
 
         W = self.root.winfo_screenwidth()
         H = self.root.winfo_screenheight()
@@ -206,7 +216,7 @@ class AmahVoiceUI:
 
         # Hint bas
         tk.Label(self.root,
-                 text='Dire  "ferme"  ou  Échap  pour quitter   ·   F11 plein écran',
+                 text='Dire  "ferme"  ou  Échap  pour quitter   ·   F11 plein écran   ·   F9 mode Live (Gemini)',
                  bg=BG, fg=DIM, font=("Consolas", 9),
                  ).place(relx=0.5, rely=0.97, anchor="center")
 
@@ -300,7 +310,7 @@ class AmahVoiceUI:
                       fill=color, font=("Consolas", 15, "bold"))
 
         # ── Barres audio animées ──────────────────────────────────────────
-        if self.state in ("ECOUTE", "REPOND"):
+        if self.state in ("ECOUTE", "REPOND", "LIVE"):
             n, sp = 36, 12
             x0    = cx - (n * sp) // 2
             y_mid = cy + 215
@@ -372,10 +382,10 @@ class AmahVoiceUI:
 
     # ── Conversation ─────────────────────────────────────────────────────────
 
-    def _set_state(self, state, user="", reply=""):
+    def _set_state(self, state, user="", reply="", label=None):
         self.state  = state
         self._color = STATES[state][0]
-        self._label = STATES[state][1]
+        self._label = label if label is not None else STATES[state][1]
         self._user_var.set(user)
         self._reply_var.set(reply)
 
@@ -401,11 +411,14 @@ class AmahVoiceUI:
             time.sleep(0.5)
             return None
         import speech_recognition as sr
+        self._listening_active.set()
         try:
             with self._mic as src:
                 audio = self._sr.listen(src, timeout=5, phrase_time_limit=6)
         except sr.WaitTimeoutError:
             return None   # rien dit dans le délai imparti
+        finally:
+            self._listening_active.clear()
         try:
             return self._sr.recognize_google(audio, language="fr-FR")
         except sr.UnknownValueError:
@@ -434,6 +447,10 @@ class AmahVoiceUI:
 
         self.root.after(0, self._set_state, "ECOUTE")
         while self._running:
+            if self._live_mode:
+                time.sleep(0.2)
+                continue
+
             texte = self._listen_once()
             if not texte:
                 continue
@@ -548,6 +565,81 @@ class AmahVoiceUI:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    # ── Mode Live (Gemini, audio temps réel) ─────────────────────────────────
+
+    def _toggle_live(self):
+        if self._live_mode:
+            self._stop_live()
+        else:
+            self._start_live()
+
+    def _start_live(self):
+        if self._live_mode:
+            return
+        if not GEMINI_API_KEY:
+            self._set_state("ERREUR", "",
+                            "Mode Live indisponible : GEMINI_API_KEY manquante dans .env")
+            return
+        try:
+            from gemini_client import GeminiLiveSession
+        except Exception as e:
+            self._set_state("ERREUR", "", f"Module Gemini indisponible : {e}")
+            return
+
+        self._live_mode = True
+        self._set_state("LIVE", "", "", label="MODE LIVE  ·  CONNEXION...")
+
+        def _status(s):
+            self.root.after(0, self._on_live_status, s)
+
+        def _user_text(t):
+            self.root.after(0, self._user_var.set, f'« {t} »')
+
+        def _reply_text(t):
+            self.root.after(0, self._reply_var.set, t)
+
+        def _tool(name, args, result):
+            self.root.after(0, self._reply_var.set, f"[outil] {name}…")
+
+        self._live_session = GeminiLiveSession(
+            api_key=GEMINI_API_KEY,
+            on_status=_status,
+            on_user_text=_user_text,
+            on_reply_text=_reply_text,
+            on_tool=_tool,
+        )
+
+        def _launch():
+            # Attend que le micro Groq se libere avant d'ouvrir le flux Gemini
+            deadline = time.time() + 2
+            while self._listening_active.is_set() and time.time() < deadline:
+                time.sleep(0.05)
+            self._live_session.start()
+
+        threading.Thread(target=_launch, daemon=True).start()
+
+    def _on_live_status(self, status):
+        if not self._live_mode:
+            return   # mode Live deja arrete -- on ignore les statuts tardifs
+        if status.startswith("Erreur Live"):
+            self._live_mode = False
+            self._live_session = None
+            self._set_state("ERREUR", "", status[:160])
+            self.root.after(2000, lambda: self._set_state("ECOUTE"))
+            return
+        if status == "Session Live fermee":
+            return
+        self._color = LIVE_COLOR
+        self._label = status
+        self.state  = "LIVE"
+
+    def _stop_live(self):
+        if self._live_session:
+            self._live_session.stop()
+            self._live_session = None
+        self._live_mode = False
+        self._set_state("ECOUTE")
+
     # ── Contrôles ─────────────────────────────────────────────────────────────
 
     def _toggle_fs(self):
@@ -556,6 +648,8 @@ class AmahVoiceUI:
 
     def _quit(self):
         self._running = False
+        if self._live_session:
+            self._live_session.stop()
         try:
             self.root.destroy()
         except Exception:

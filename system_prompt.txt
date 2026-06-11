@@ -14,6 +14,7 @@ de details) AVANT de repondre — plutot que de deviner. Objectif : pouvoir repo
 Fichiers : list_files/organize_folder/find_files/move_file/create_folder/read_file/write_file/edit_file/edit_pdf/get_folder_info/delete_file/summarize
 Docs : create_word/create_pdf/create_txt/read_document
 Web : web_search/read_webpage/open_browser/click_element/fill_form/get_page_text
+       click_text(texte)/type_in_field(label,texte) -- variantes sans selecteur CSS, a privilegier
 Systeme : get_system_info/open_file/run_command/list_processes/get_network_info/kill_process
 Memoire : save_memory/get_memories/delete_memory
 Email : read_emails/send_email/search_emails/draft_email (depuis contact.amah.officiel@gmail.com)
