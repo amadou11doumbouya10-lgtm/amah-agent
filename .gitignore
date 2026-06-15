@@ -42,6 +42,13 @@ build_log*.txt
 # Mémoire interne Claude Code
 .claude/
 
+# Profil navigateur persistant (cookies/sessions, données perso)
+browser_profile/
+
+# Logs de debug locaux
+live_debug.log
+*_debug.log
+
 # Fichiers média lourds (vidéos/audios de présentation)
 voix/*.mp4
 voix/*.mp3

@@ -7,12 +7,47 @@ deux outils continuaient d'echouer silencieusement avec la cle 1. Tout le monde
 passe maintenant par GroqClient.get().chat(...) pour partager la meme rotation.
 """
 import os
+import re
+import json
 import time
 import threading
 
 from groq import Groq
 
 _DELAYS = [1, 2, 4]
+
+_FAILED_GENERATION_RE = re.compile(r"<function=(\w+)\s*(.*)</function>\s*$", re.DOTALL)
+
+
+def repair_tool_use_failed(e: Exception):
+    """Repare l'erreur Groq 400 'tool_use_failed'.
+
+    Llama 3.3 70B emet parfois un pseudo-appel texte
+    '<function=NOM{"arg": "valeur"}</function>' (au lieu d'un tool_calls
+    structure) -- il manque le '>' apres le nom attendu par le format normal
+    '<function=NOM>{...}</function>'. Groq rejette alors la reponse avec une
+    erreur 400 AVANT de renvoyer le moindre objet response, en placant ce
+    texte brut dans error.failed_generation.
+
+    Renvoie (nom_outil, args_dict) si l'erreur peut etre reparee, sinon None.
+    """
+    body = getattr(e, "body", None)
+    err  = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(err, dict) or err.get("code") != "tool_use_failed":
+        return None
+
+    m = _FAILED_GENERATION_RE.match(err.get("failed_generation") or "")
+    if not m:
+        return None
+
+    name, rest = m.group(1), m.group(2).lstrip(">").strip()
+    try:
+        args, _ = json.JSONDecoder().raw_decode(rest)
+    except Exception:
+        return None
+    if not isinstance(args, dict):
+        return None
+    return name, args
 
 
 class GroqClient:

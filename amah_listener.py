@@ -68,7 +68,7 @@ WAKE_WORDS = {
 
 class ListenerWidget:
 
-    SIZE = 120
+    SIZE = 80
 
     def __init__(self):
         self._frame      = 0
@@ -95,6 +95,13 @@ class ListenerWidget:
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.90)
         self.root.configure(bg=BG)
+        # Lancee par gui.py (processus en arriere-plan), la fenetre est creee
+        # sans le style WS_VISIBLE (Windows ne l'affiche jamais, meme avec
+        # "-topmost") : deiconify() force son affichage ; lift()/focus_force()
+        # la passent ensuite au premier plan.
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
 
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
@@ -153,46 +160,52 @@ class ListenerWidget:
         col = self._color
         c.delete("all")
 
+        # Echelle par rapport a la taille de reference (120px) -- permet de
+        # reduire SIZE sans que le dessin (halos, hexagone, textes...) soit
+        # rogne ou desproportionne.
+        k = s / 120.0
+
         # Fond
         c.create_rectangle(0, 0, s, s, fill=BG, outline=col, width=1)
 
         # Halos
         for r, a in [(46, 0.07), (34, 0.13), (22, 0.20)]:
-            c.create_oval(cx-r, cy-r-4, cx+r, cy+r-4,
+            r *= k
+            c.create_oval(cx-r, cy-r-4*k, cx+r, cy+r-4*k,
                           fill=_blend(BG, col, a), outline="")
 
         # Hexagone rotatif
-        pts = _hex_pts(cx, cy - 6, 26 + 2 * math.sin(math.radians(f * 4)),
+        pts = _hex_pts(cx, cy - 6*k, (26 + 2 * math.sin(math.radians(f * 4))) * k,
                        offset=f * 1.4)
         c.create_polygon(pts, outline=col, fill="", width=1)
 
         # Orbe "A"
-        orb = 15 + 1.5 * math.sin(math.radians(f * 7))
-        c.create_oval(cx-orb, cy-6-orb, cx+orb, cy-6+orb,
+        orb = (15 + 1.5 * math.sin(math.radians(f * 7))) * k
+        c.create_oval(cx-orb, cy-6*k-orb, cx+orb, cy-6*k+orb,
                       fill=_blend(BG, col, 0.18), outline=col, width=1)
-        c.create_text(cx, cy - 6, text="A", fill=col,
-                      font=("Consolas", 13, "bold"))
+        c.create_text(cx, cy - 6*k, text="A", fill=col,
+                      font=("Consolas", max(7, round(13 * k)), "bold"))
 
         # État
         label = {"INIT":"...", "CALIB":"CALIB",
                  "ECOUTE":"ECOUTE", "DETECTION":"AMAH !",
                  "ACTIVE":"ACTIVE", "ERREUR":"ERREUR"}.get(self._state, self._state)
-        c.create_text(cx, cy + 22, text=label, fill=col,
-                      font=("Consolas", 8, "bold"))
+        c.create_text(cx, cy + 22*k, text=label, fill=col,
+                      font=("Consolas", max(6, round(8 * k)), "bold"))
 
-        # Dernier texte reconnu (debug, max 12 chars)
+        # Dernier texte reconnu (debug, max 14 chars)
         if self._last_text:
             preview = self._last_text[:14]
-            c.create_text(cx, cy + 34, text=preview, fill=_blend(BG, col, 0.6),
-                          font=("Consolas", 6))
+            c.create_text(cx, cy + 34*k, text=preview, fill=_blend(BG, col, 0.6),
+                          font=("Consolas", max(5, round(6 * k))))
 
         # Barre pulsante
-        bw = int(12 + 20 * abs(math.sin(math.radians(f * 6))))
-        c.create_rectangle(cx - bw, cy + 42, cx + bw, cy + 45,
+        bw = (12 + 20 * abs(math.sin(math.radians(f * 6)))) * k
+        c.create_rectangle(cx - bw, cy + 42*k, cx + bw, cy + 45*k,
                            fill=col, outline="")
 
         # Coins HUD
-        L, P = 8, 4
+        L, P = 8*k, 4*k
         for ax, ay, dx, dy in [(P,P,1,1),(s-P,P,-1,1),(P,s-P,1,-1),(s-P,s-P,-1,-1)]:
             c.create_line(ax, ay, ax+dx*L, ay, fill=col, width=1)
             c.create_line(ax, ay, ax, ay+dy*L, fill=col, width=1)

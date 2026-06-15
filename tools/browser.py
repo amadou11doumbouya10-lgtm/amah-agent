@@ -1,19 +1,30 @@
-from playwright.sync_api import sync_playwright, Browser, Page
+from playwright.sync_api import sync_playwright, BrowserContext, Page
 import atexit
 import logging
+import sys
+from pathlib import Path
 
 log = logging.getLogger("amah.browser")
 
 _playwright = None
-_browser: Browser = None
+_context: BrowserContext = None
 _page: Page = None
+
+_BASE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent.parent
+_PROFILE_DIR = str(_BASE / "browser_profile")
+
+# Flag Chromium standard qui retire le marqueur d'automatisation
+# (navigator.webdriver=true + bandeau "controle par un logiciel de test").
+# Sans lui, Google affiche systematiquement une page "trafic exceptionnel"
+# (CAPTCHA) sur toute recherche faite via Playwright.
+_LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 
 
 def _close_browser():
-    global _browser, _playwright
+    global _context, _playwright
     try:
-        if _browser and _browser.is_connected():
-            _browser.close()
+        if _context:
+            _context.close()
         if _playwright:
             _playwright.stop()
     except Exception as e:
@@ -23,17 +34,46 @@ def _close_browser():
 atexit.register(_close_browser)
 
 
+def _launch_context(p):
+    """Lance le vrai Edge (profil persistant Amah, garde cookies/connexions
+    entre les sessions) -- repli sur Chromium embarque si Edge n'est pas
+    installe (rare sur Windows 11)."""
+    try:
+        return p.chromium.launch_persistent_context(
+            _PROFILE_DIR, channel="msedge", headless=False, args=_LAUNCH_ARGS,
+        )
+    except Exception as e:
+        if "msedge" in str(e).lower() or "channel" in str(e).lower():
+            return p.chromium.launch_persistent_context(
+                _PROFILE_DIR, headless=False, args=_LAUNCH_ARGS,
+            )
+        raise
+
+
 def _ensure_browser():
-    global _playwright, _browser, _page
-    if _browser is None or not _browser.is_connected():
+    global _playwright, _context, _page
+    page_ok = _page is not None
+    if page_ok:
         try:
-            _playwright = sync_playwright().start()
-            _browser    = _playwright.chromium.launch(headless=False)
-            _page       = _browser.new_page()
+            page_ok = not _page.is_closed()
+        except Exception:
+            page_ok = False
+    if not page_ok:
+        if _context is not None:
+            try:
+                _page = _context.new_page()
+                return _page
+            except Exception:
+                _context = None
+        try:
+            if _playwright is None:
+                _playwright = sync_playwright().start()
+            _context = _launch_context(_playwright)
+            _page    = _context.pages[0] if _context.pages else _context.new_page()
         except Exception as e:
             if "Executable doesn't exist" in str(e) or "playwright install" in str(e).lower():
                 raise RuntimeError(
-                    "Le navigateur Chrome n'est pas installé.\n"
+                    "Le navigateur n'est pas installé.\n"
                     "Lance le fichier 'installer_navigateur.bat' une seule fois,\n"
                     "puis relance Amah."
                 )
@@ -117,6 +157,13 @@ def type_in_field(label: str, text: str) -> dict:
             lambda: page.get_by_label(label, exact=False),
             lambda: page.get_by_placeholder(label, exact=False),
             lambda: page.get_by_role("textbox", name=label, exact=False),
+            # Barres de recherche (Google, Bing...) : souvent role=combobox/
+            # searchbox avec un aria-label abrege ("Rech.") mais un attribut
+            # title complet ("Rechercher") -- aucune des strategies ci-dessus
+            # ne les detecte.
+            lambda: page.get_by_role("combobox", name=label, exact=False),
+            lambda: page.get_by_role("searchbox", name=label, exact=False),
+            lambda: page.get_by_title(label, exact=False),
         ]
         for strat in strategies:
             try:

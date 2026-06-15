@@ -23,6 +23,10 @@ import functools
 import json
 import queue
 import threading
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
 
 import sounddevice as sd
 from google import genai
@@ -32,6 +36,16 @@ from gemini_tools import get_tools, GEMINI_SYSTEM_INSTRUCTION
 from tools import TOOL_FUNCTIONS
 
 MODEL = "gemini-2.5-flash-native-audio-latest"
+
+_LIVE_LOG = Path(__file__).parent / "live_debug.log"
+
+def _log(msg):
+    """Debug temporaire : trace le cycle de vie du Mode Live dans un fichier."""
+    try:
+        with open(_LIVE_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat(timespec='milliseconds')} {msg}\n")
+    except Exception:
+        pass
 
 SEND_RATE    = 16000   # frequence d'echantillonnage attendue par Gemini en entree
 RECEIVE_RATE = 24000   # frequence d'echantillonnage de l'audio renvoye par Gemini
@@ -51,7 +65,13 @@ class GeminiLiveSession:
 
         self._thread = None
         self._loop   = None
+        self._session = None
         self._stop_event = threading.Event()
+        # Coupe le micro pendant que Amah parle (et juste apres) -- sans
+        # annulation d'echo materielle, le micro reenregistre la voix sortie
+        # par les haut-parleurs et Gemini se met a "repondre" a sa propre
+        # voix en boucle.
+        self._speaking = threading.Event()
 
     # ── Cycle de vie ─────────────────────────────────────────────────────────
 
@@ -67,20 +87,75 @@ class GeminiLiveSession:
         if self._thread:
             self._thread.join(timeout)
 
+    def send_text(self, text: str) -> bool:
+        """Envoie un message texte a Gemini comme un tour utilisateur complet
+        (saisi au clavier, en plus/au lieu du micro). Thread-safe : peut etre
+        appele depuis le thread UI tkinter."""
+        if self._loop is None or self._session is None:
+            return False
+
+        async def _send():
+            await self._session.send_client_content(
+                turns=types.Content(role="user", parts=[types.Part(text=text)]),
+                turn_complete=True,
+            )
+
+        asyncio.run_coroutine_threadsafe(_send(), self._loop)
+        return True
+
     # ── Thread + boucle asyncio ──────────────────────────────────────────────
 
     def _run_thread(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        _log("_run_thread: demarrage")
+        # La connexion Gemini Live se ferme parfois seule apres quelques
+        # dizaines de secondes (1006 abnormal closure / 1011 keepalive ping
+        # timeout) ou n'arrive pas a s'etablir (handshake timeout). Plutot
+        # que de planter tout le Mode Live, on retente automatiquement avec
+        # un backoff exponentiel -- l'utilisateur n'a pas besoin de
+        # ressortir/rentrer en mode Live a la main.
+        MAX_RETRIES = 4
+        retries = 0
+        backoff = 1.0
         try:
-            self._loop.run_until_complete(self._main())
+            while not self._stop_event.is_set():
+                error, duration = self._loop.run_until_complete(self._main())
+                if self._stop_event.is_set() or error is None:
+                    break
+                if duration > 10:
+                    # La connexion a tenu un moment avant de tomber : on
+                    # repart sur une serie fraiche de tentatives.
+                    retries = 0
+                    backoff = 1.0
+                retries += 1
+                if retries > MAX_RETRIES:
+                    _log(f"_run_thread: abandon apres {retries - 1} reconnexion(s), "
+                         f"derniere erreur: {error}")
+                    self.on_status(f"Erreur Live : {error}")
+                    break
+                _log(f"_run_thread: reconnexion {retries}/{MAX_RETRIES} dans "
+                     f"{backoff:.0f}s ({error})")
+                self.on_status(f"Connexion interrompue -- reconnexion ({retries}/{MAX_RETRIES})...")
+                waited = 0.0
+                while waited < backoff and not self._stop_event.is_set():
+                    time.sleep(0.2)
+                    waited += 0.2
+                backoff = min(backoff * 2, 15)
+            _log("_run_thread: termine")
         except Exception as e:
+            _log(f"_run_thread: EXCEPTION\n{traceback.format_exc()}")
             self.on_status(f"Erreur Live : {e}")
         finally:
             self._loop.close()
             self._loop = None
 
     async def _main(self):
+        """Gere une tentative de connexion Live. Retourne (error, duration) :
+        error est None si l'arret a ete demande par l'utilisateur (stop()),
+        sinon le message de l'erreur qui a interrompu la connexion. duration
+        est le temps (s) pendant lequel la session est restee connectee (0
+        si la connexion n'a jamais ete etablie)."""
         client = genai.Client(api_key=self.api_key)
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -91,36 +166,66 @@ class GeminiLiveSession:
             speech_config=types.SpeechConfig(language_code="fr-FR"),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             input_audio_transcription=types.AudioTranscriptionConfig(),
+            # Sensibilite max : un micro avec un faible niveau d'entree peut
+            # ne pas declencher la detection vocale par defaut de Gemini.
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                ),
+            ),
         )
 
         self.on_status("Connexion a Gemini Live...")
-        async with client.aio.live.connect(model=MODEL, config=config) as session:
-            self.on_status("Connecte -- a vous la parole")
+        error = None
+        connected_at = None
+        try:
+            async with client.aio.live.connect(model=MODEL, config=config) as session:
+                connected_at = time.monotonic()
+                self._session = session
+                self.on_status("Connecte -- a vous la parole")
+                _log("_main: connecte, demarrage send/recv loops")
 
-            send_task = asyncio.create_task(self._send_audio_loop(session))
-            recv_task = asyncio.create_task(self._receive_loop(session))
+                send_task = asyncio.create_task(self._send_audio_loop(session))
+                recv_task = asyncio.create_task(self._receive_loop(session))
 
-            try:
-                while not self._stop_event.is_set():
-                    if send_task.done() or recv_task.done():
-                        break
-                    await asyncio.sleep(0.1)
-            finally:
-                send_task.cancel()
-                recv_task.cancel()
-                for t in (send_task, recv_task):
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                try:
+                    while not self._stop_event.is_set():
+                        if send_task.done() or recv_task.done():
+                            _log(f"_main: boucle terminee (send.done={send_task.done()} "
+                                 f"recv.done={recv_task.done()})")
+                            break
+                        await asyncio.sleep(0.1)
+                finally:
+                    send_task.cancel()
+                    recv_task.cancel()
+                    for name, t in (("send", send_task), ("recv", recv_task)):
+                        try:
+                            await t
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            _log(f"_main: {name}_task EXCEPTION\n{traceback.format_exc()}")
+                            error = error or str(e)
+        except Exception as e:
+            _log(f"_main: connexion EXCEPTION\n{traceback.format_exc()}")
+            error = error or str(e)
 
-        self.on_status("Session Live fermee")
+        self._session = None
+        duration = (time.monotonic() - connected_at) if connected_at else 0.0
+        _log(f"_main: termine (error={error!r} duration={duration:.1f}s)")
+        if self._stop_event.is_set():
+            self.on_status("Session Live fermee")
+        return error, duration
 
     # ── Microphone -> Gemini ─────────────────────────────────────────────────
 
     async def _send_audio_loop(self, session):
         loop = asyncio.get_event_loop()
-        audio_q: queue.Queue = queue.Queue()
+        # asyncio.Queue (et non queue.Queue) : un .get() bloquant sur une
+        # queue.Queue, evalue avant d'etre passe a asyncio.wait_for, gele la
+        # boucle d'evenements -- _receive_loop ne demarre alors jamais et
+        # aucun audio n'est envoye a Gemini (mode Live "silencieux").
+        audio_q: asyncio.Queue = asyncio.Queue()
 
         def _callback(indata, frames, time_info, status):
             loop.call_soon_threadsafe(audio_q.put_nowait, bytes(indata))
@@ -129,15 +234,22 @@ class GeminiLiveSession:
             samplerate=SEND_RATE, channels=1, dtype="int16",
             blocksize=CHUNK_SAMPLES, callback=_callback,
         )
+        _log(f"_send_audio_loop: ouverture micro device={stream.device}")
         with stream:
+            _log("_send_audio_loop: micro demarre")
             while not self._stop_event.is_set():
                 try:
                     chunk = await asyncio.wait_for(audio_q.get(), timeout=0.2)
                 except asyncio.TimeoutError:
                     continue
+                if self._speaking.is_set():
+                    # Amah parle (ou vient de parler) : on n'envoie pas son
+                    # propre echo au micro vers Gemini.
+                    continue
                 await session.send_realtime_input(
                     audio=types.Blob(data=chunk, mime_type=f"audio/pcm;rate={SEND_RATE}")
                 )
+        _log("_send_audio_loop: arret")
 
     # ── Gemini -> Haut-parleurs + outils ─────────────────────────────────────
 
@@ -146,16 +258,62 @@ class GeminiLiveSession:
         play_q: queue.Queue = queue.Queue()
         stop_play = threading.Event()
 
+        # Delai apres la fin de la lecture avant de reouvrir le micro --
+        # laisse le temps a l'echo residuel de s'eteindre. Reduit par
+        # rapport a 0.6 : un hangover trop long coupait le debut de la
+        # phrase suivante de l'utilisateur (mauvaise comprehension).
+        ECHO_HANGOVER = 0.35
+
+        # Nombre de blocs audio accumules avant de demarrer la lecture --
+        # absorbe les a-coups d'arrivee reseau et evite les craquements
+        # (sous-alimentation du flux audio). Cout : quelques dizaines de ms,
+        # negligeable face a la latence reseau de Gemini.
+        PREBUFFER_CHUNKS = 3
+
         def _player():
-            with sd.RawOutputStream(samplerate=RECEIVE_RATE, channels=1, dtype="int16") as out:
-                while not stop_play.is_set():
-                    try:
-                        chunk = play_q.get(timeout=0.2)
-                    except queue.Empty:
-                        continue
-                    if chunk is None:
-                        continue
-                    out.write(chunk)
+            _log("_player: ouverture haut-parleur")
+            try:
+                with sd.RawOutputStream(samplerate=RECEIVE_RATE, channels=1, dtype="int16",
+                                         latency="high") as out:
+                    _log("_player: haut-parleur demarre")
+                    n = 0
+                    # Instant ou la lecture de toutes les trames deja ecrites
+                    # sera terminee (out.write() rend la main avant la fin
+                    # reelle de la lecture -- il faut estimer a partir de la
+                    # duree audio cumulee, pas de l'heure d'ecriture).
+                    playback_end = 0.0
+                    prebuffer: list = []
+                    primed = False
+                    while not stop_play.is_set():
+                        try:
+                            chunk = play_q.get(timeout=0.2)
+                        except queue.Empty:
+                            if (self._speaking.is_set()
+                                    and time.monotonic() > playback_end + ECHO_HANGOVER):
+                                self._speaking.clear()
+                            continue
+                        if chunk is None:
+                            continue
+                        if not primed:
+                            prebuffer.append(chunk)
+                            if len(prebuffer) < PREBUFFER_CHUNKS:
+                                continue
+                            primed = True
+                            to_write, prebuffer = prebuffer, []
+                        else:
+                            to_write = [chunk]
+                        for c in to_write:
+                            self._speaking.set()
+                            out.write(c)
+                            duration = len(c) / (RECEIVE_RATE * 2)  # 16 bits mono
+                            playback_end = max(playback_end, time.monotonic()) + duration
+                            n += 1
+                            if n == 1:
+                                _log("_player: premier chunk ecrit")
+            except Exception as e:
+                _log(f"_player: EXCEPTION\n{traceback.format_exc()}")
+                self.on_status(f"Erreur Live (audio) : {e}")
+            _log("_player: arret")
 
         player_thread = threading.Thread(target=_player, daemon=True)
         player_thread.start()
@@ -164,45 +322,51 @@ class GeminiLiveSession:
         reply_chunks: list[str] = []
 
         try:
-            async for msg in session.receive():
-                if self._stop_event.is_set():
-                    break
+            # session.receive() ne couvre qu'un seul "tour" : le generateur
+            # se termine de lui-meme apres turn_complete. Il faut le
+            # rappeler pour chaque nouveau tour, sinon la boucle se termine
+            # apres la 1ere reponse et _main ferme toute la session (le HUD
+            # reste alors bloque sur "MODE LIVE" sans plus rien recevoir).
+            while not self._stop_event.is_set():
+                async for msg in session.receive():
+                    if self._stop_event.is_set():
+                        break
 
-                sc = msg.server_content
-                if sc:
-                    if sc.input_transcription and sc.input_transcription.text:
-                        user_chunks.append(sc.input_transcription.text)
-                        self.on_user_text("".join(user_chunks))
-                    if sc.output_transcription and sc.output_transcription.text:
-                        reply_chunks.append(sc.output_transcription.text)
-                        self.on_reply_text("".join(reply_chunks))
-                    if sc.model_turn:
-                        for part in sc.model_turn.parts:
-                            if part.inline_data and part.inline_data.data:
-                                play_q.put_nowait(part.inline_data.data)
-                    if sc.interrupted:
-                        # L'utilisateur a coupe la parole : on vide la file audio
-                        while not play_q.empty():
-                            try:
-                                play_q.get_nowait()
-                            except queue.Empty:
-                                break
-                    if sc.turn_complete:
-                        user_chunks = []
-                        reply_chunks = []
-                        self.on_status("ECOUTE")
+                    sc = msg.server_content
+                    if sc:
+                        if sc.input_transcription and sc.input_transcription.text:
+                            user_chunks.append(sc.input_transcription.text)
+                            self.on_user_text("".join(user_chunks))
+                        if sc.output_transcription and sc.output_transcription.text:
+                            reply_chunks.append(sc.output_transcription.text)
+                            self.on_reply_text("".join(reply_chunks))
+                        if sc.model_turn:
+                            for part in sc.model_turn.parts:
+                                if part.inline_data and part.inline_data.data:
+                                    play_q.put_nowait(part.inline_data.data)
+                        if sc.interrupted:
+                            # L'utilisateur a coupe la parole : on vide la file audio
+                            while not play_q.empty():
+                                try:
+                                    play_q.get_nowait()
+                                except queue.Empty:
+                                    break
+                        if sc.turn_complete:
+                            user_chunks = []
+                            reply_chunks = []
+                            self.on_status("ECOUTE")
 
-                if msg.tool_call:
-                    for fc in msg.tool_call.function_calls:
-                        result = await loop.run_in_executor(
-                            None, self._execute_tool, fc.name, fc.args or {}
-                        )
-                        self.on_tool(fc.name, fc.args or {}, result)
-                        await session.send_tool_response(
-                            function_responses=[types.FunctionResponse(
-                                id=fc.id, name=fc.name, response={"result": result},
-                            )]
-                        )
+                    if msg.tool_call:
+                        for fc in msg.tool_call.function_calls:
+                            result = await loop.run_in_executor(
+                                None, self._execute_tool, fc.name, fc.args or {}
+                            )
+                            self.on_tool(fc.name, fc.args or {}, result)
+                            await session.send_tool_response(
+                                function_responses=[types.FunctionResponse(
+                                    id=fc.id, name=fc.name, response={"result": result},
+                                )]
+                            )
         finally:
             stop_play.set()
 

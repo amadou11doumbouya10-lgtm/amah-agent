@@ -1,0 +1,18 @@
+Webcam en direct dans l'interface principale (gui.py)
+
+Idee initiale : afficher un petit cadre avec l'apercu webcam en direct
+directement dans la fenetre principale de chat (gui.py), au lieu d'ouvrir
+une autre interface -- comme ca existe deja dans voice_fullscreen.py
+(Ctrl+W / "affiche la webcam", tools/webcam_vision.py + tools/webcam.py).
+
+A faire (pas encore implemente) :
+- Bouton toggle dans l'en-tete de gui.py (a cote de "Amah ecoute"), ex: "Webcam"
+- Petit Label tkinter rafraichi via root.after(), alimente par le
+  cv2.VideoCapture partage de tools/webcam.py (acquire/read_frame/release)
+- On/off pour ne pas laisser la camera allumee en permanence (vie privee)
+- Reutiliser le pattern _tool_toggle_webcam_preview de voice_fullscreen.py
+  si on veut aussi le piloter a la voix/au texte depuis gui.py
+
+Idee secondaire (non clarifiee) : "afficher un chat" (image/animation de
+chat) dans l'interface -- a redefinir avec l'utilisateur si l'idee revient
+(mascotte ? easter egg ? a clarifier).

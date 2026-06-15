@@ -4,9 +4,10 @@ Style : HUD futuriste / cyberpunk (hexagone central, grille, coins HUD)
 Lancement : py -3.13 voice_fullscreen.py
 Quitter   : dire "ferme" / "quitte" / "au revoir"  ou  Échap
 """
-import os, sys, json, math, time, threading
+import os, sys, json, math, random, time, threading
 from pathlib import Path
 from datetime import datetime
+from types import SimpleNamespace
 import tkinter as tk
 from dotenv import load_dotenv
 
@@ -18,9 +19,19 @@ load_dotenv(_env)
 from tools.voice import speak
 from tools import TOOL_FUNCTIONS
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
-from groq_client import GroqClient
+from groq_client import GroqClient, repair_tool_use_failed
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+_LIVE_LOG = Path(__file__).parent / "live_debug.log"
+
+def _log(msg):
+    """Debug temporaire : trace le cycle de vie du Mode Live dans un fichier."""
+    try:
+        with open(_LIVE_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat(timespec='milliseconds')} {msg}\n")
+    except Exception:
+        pass
 
 # ── Palette cyberpunk / HUD ──────────────────────────────────────────────────
 BG        = "#03050a"        # noir presque pur, légère teinte bleue
@@ -45,6 +56,18 @@ STATES = {
     "REPOND": (GREEN,     "REPOND"),
     "ERREUR": (RED,       "ERREUR"),
     "LIVE":   (LIVE_COLOR,"MODE LIVE  ·  GEMINI"),
+}
+
+# Anneau de barres "vivant" autour de l'hexagone : (amplitude de base,
+# amplitude de variation, vitesse) par etat -- inspire de la maquette
+# idees/mockup_hud_voice.html (REPOS / ECOUTE / AMAH PARLE).
+_RING_REACT = {
+    "IDLE":   (0.05, 0.04, 1.0),
+    "ECOUTE": (0.20, 0.30, 2.5),
+    "PENSE":  (0.18, 0.18, 1.8),
+    "REPOND": (0.40, 0.55, 5.0),
+    "ERREUR": (0.06, 0.04, 1.0),
+    "LIVE":   (0.40, 0.55, 5.0),
 }
 
 STOP_WORDS = {
@@ -119,6 +142,73 @@ _CAT_TOOLS = {
     "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
 }
 
+# Outil local (hors TOOLS_DEFINITIONS) : bascule du Mode Live Gemini, gere
+# directement par cette interface (F9). Ajoute a chaque appel pour qu'Amah
+# puisse l'activer/desactiver a la demande, sans passer par le clavier.
+_LIVE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "toggle_live_mode",
+        "description": ("Active ou desactive le Mode Live : conversation audio en "
+                         "temps reel avec Gemini (comme un appel), avec interruption "
+                         "naturelle. A utiliser seulement si l'utilisateur demande "
+                         "explicitement de passer en mode live / conversation directe, "
+                         "ou d'en sortir."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "activer": {"type": "boolean",
+                             "description": "true pour activer le Mode Live, false pour le desactiver."},
+            },
+            "required": ["activer"],
+        },
+    },
+}
+
+# Outil local : affiche/masque l'apercu webcam en direct dans le HUD
+# (Ctrl+W). Pas un appel d'analyse IA -- juste l'image en continu a l'ecran.
+_WEBCAM_PREVIEW_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "toggle_webcam_preview",
+        "description": ("Affiche ou masque l'apercu video de la webcam en "
+                         "direct dans le coin de l'interface vocale (pas "
+                         "d'analyse IA, juste l'image). A utiliser si "
+                         "l'utilisateur demande de voir/afficher/montrer la "
+                         "webcam en direct, ou de la cacher/fermer."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "activer": {"type": "boolean",
+                             "description": "true pour afficher l'apercu, false pour le masquer."},
+            },
+            "required": ["activer"],
+        },
+    },
+}
+
+# Outil local : affiche/masque le champ de saisie texte (Ctrl+T). Permet a
+# l'utilisateur de demander vocalement "ouvre le champ texte" sans toucher au clavier.
+_TEXT_ENTRY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "toggle_text_entry",
+        "description": ("Affiche ou masque un petit champ de saisie texte dans "
+                         "l'interface vocale, pour ecrire un message au lieu de "
+                         "parler. A utiliser si l'utilisateur demande d'afficher/"
+                         "ouvrir/montrer le champ ou la zone de texte, ou de le "
+                         "fermer/masquer."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "activer": {"type": "boolean",
+                             "description": "true pour afficher le champ, false pour le masquer."},
+            },
+            "required": ["activer"],
+        },
+    },
+}
+
 def _select_tools(message: str):
     words = message.lower().replace("'", " ").split()
     cats  = {_WORD_TO_CAT[w] for w in words if w in _WORD_TO_CAT}
@@ -128,7 +218,11 @@ def _select_tools(message: str):
         needed = set()
         for cat in cats:
             needed |= _CAT_TOOLS.get(cat, set())
-    return [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in needed]
+    tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in needed]
+    tools.append(_LIVE_TOOL)
+    tools.append(_WEBCAM_PREVIEW_TOOL)
+    tools.append(_TEXT_ENTRY_TOOL)
+    return tools
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,11 +267,25 @@ class AmahVoiceUI:
 
         self._live_mode    = False  # True pendant le mode Live (Gemini, audio temps reel)
         self._live_session = None
+        self._pending_live_action = None  # "start"/"stop" : applique apres la confirmation vocale
+
+        self._webcam_active = threading.Event()  # apercu webcam en direct dans le HUD
+        self._webcam_frame  = None                # derniere image PIL (thread camera)
+        self._webcam_photo  = None                # PhotoImage Tk (cree dans le thread UI)
+
+        self._chat_lock = threading.Lock()  # serialise _chat() entre voix et texte tape
+        self._text_entry_visible = False  # suivi thread-safe (winfo_ismapped n'est pas thread-safe)
+
+        self._cpu = 0.0   # % CPU, mis a jour par _metrics_loop (jauges bas-gauche)
+        self._ram = 0.0   # % RAM
+        self._recent_memories = []  # derniers contenus get_memories (panneau bas-droite)
 
         self._build()
         self._grid_img = self._make_grid(self._W, self._H)  # grille pré-rendue 1×
         self._animate()
         threading.Thread(target=self._init_mic, daemon=True).start()
+        threading.Thread(target=self._metrics_loop, daemon=True).start()
+        threading.Thread(target=self._memories_loop, daemon=True).start()
         self.root.after(1800, self._start_loop)
 
     # ── Construction ─────────────────────────────────────────────────────────
@@ -187,9 +295,25 @@ class AmahVoiceUI:
         self.root.title("Amah — Interface Vocale")
         self.root.configure(bg=BG)
         self.root.attributes("-fullscreen", True)
+        # Lancee depuis amah_listener.py (processus en arriere-plan), la fenetre
+        # est creee sans le style WS_VISIBLE : Windows ne l'affiche jamais sans
+        # deiconify(), meme avec "-topmost". On la passe ensuite au premier plan
+        # avec lift()/focus_force() (anti focus-stealing) ; "-topmost" est retire
+        # apres coup pour ne pas la geler au-dessus de tout en permanence.
+        self.root.deiconify()
+        self.root.attributes("-topmost", True)
+        self.root.lift()
+        self.root.focus_force()
+        self.root.after(300, lambda: self.root.attributes("-topmost", False))
         self.root.bind("<Escape>", lambda e: self._quit())
         self.root.bind("<F11>",    lambda e: self._toggle_fs())
         self.root.bind("<F9>",     lambda e: self._toggle_live())
+        # F9 est souvent une touche multimedia (volume/luminosite) sur les
+        # claviers de portable et necessite Fn -- on ajoute un raccourci
+        # de secours qui n'a pas ce probleme.
+        self.root.bind("<Control-l>", lambda e: self._toggle_live())
+        self.root.bind("<Control-w>", lambda e: self._toggle_webcam_preview())
+        self.root.bind("<Control-t>", lambda e: self._toggle_text_entry())
 
         W = self.root.winfo_screenwidth()
         H = self.root.winfo_screenheight()
@@ -216,9 +340,21 @@ class AmahVoiceUI:
 
         # Hint bas
         tk.Label(self.root,
-                 text='Dire  "ferme"  ou  Échap  pour quitter   ·   F11 plein écran   ·   F9 mode Live (Gemini)',
+                 text='Dire  "ferme"  ou  Échap  pour quitter   ·   F11 plein écran   ·   F9 / Ctrl+L mode Live (Gemini)   ·   Ctrl+W webcam en direct   ·   Ctrl+T champ texte',
                  bg=BG, fg=DIM, font=("Consolas", 9),
                  ).place(relx=0.5, rely=0.97, anchor="center")
+
+        # Champ de saisie texte (masqué par défaut, Ctrl+T pour l'afficher) --
+        # fonctionne en mode normal (Groq) comme en Mode Live (Gemini).
+        self._text_var = tk.StringVar(value="")
+        self._text_entry = tk.Entry(
+            self.root, textvariable=self._text_var,
+            bg=_blend(BG, CYAN, 0.10), fg=WHITE, insertbackground=CYAN,
+            font=("Consolas", 13), relief="flat",
+            highlightthickness=2, highlightbackground=CYAN, highlightcolor=CYAN,
+        )
+        self._text_entry.bind("<Return>", self._submit_text)
+        self._text_entry.bind("<Escape>", self._hide_text_entry)
 
     # ── Animation ─────────────────────────────────────────────────────────────
 
@@ -274,6 +410,25 @@ class AmahVoiceUI:
             y2 = cy + (r_mid + 16) * math.sin(ang)
             c.create_line(x1, y1, x2, y2,
                           fill=_blend(DIM, color, 0.6), width=2)
+
+        # ── Anneau de barres "vivant", reactif a l'etat ────────────────────
+        # Inspire de idees/mockup_hud_voice.html : les batons partent du bord
+        # de l'anneau exterieur (r_out) et grandissent vers l'exterieur, avec
+        # une amplitude/vivacite qui depend de l'etat (repos/ecoute/parle).
+        amp_base, amp_jit, speed = _RING_REACT.get(self.state, _RING_REACT["IDLE"])
+        n_bars = 48
+        for i in range(n_bars):
+            ang   = math.radians(i * (360 / n_bars))
+            wave  = 0.5 + 0.5 * math.sin(math.radians(f * speed * 3 + i * 7.5))
+            noise = random.random()
+            amp   = amp_base + amp_jit * (0.6 * wave + 0.4 * noise)
+            length = 6 + amp * 35
+            x1 = cx + r_out * math.cos(ang)
+            y1 = cy + r_out * math.sin(ang)
+            x2 = cx + (r_out + length) * math.cos(ang)
+            y2 = cy + (r_out + length) * math.sin(ang)
+            bcol = _blend(BG, color, 0.20 + amp * 0.80)
+            c.create_line(x1, y1, x2, y2, fill=bcol, width=3)
 
         # ── Anneau pulsant ────────────────────────────────────────────────
         pulse = 128 + 12 * math.sin(math.radians(f * 4))
@@ -339,6 +494,68 @@ class AmahVoiceUI:
                       text=datetime.now().strftime("%a %d %b %Y"),
                       fill=_blend(BG, color, 0.45),
                       font=("Consolas", 9), anchor="ne")
+        c.create_line(W - 22, 14, W - 22, 60, fill=color, width=2)
+
+        # ── Jauges CPU / RAM (bas gauche) ──────────────────────────────────
+        c.create_line(22, H - 116, 22, H - 56, fill=color, width=2)
+        bx, by = 46, H - 100
+        for jlabel, val in (("CPU", self._cpu), ("RAM", self._ram)):
+            c.create_text(bx, by, text=jlabel, fill=_blend(BG, color, 0.6),
+                          font=("Consolas", 10, "bold"), anchor="w")
+            track_x, track_w = bx + 50, 140
+            c.create_rectangle(track_x, by - 6, track_x + track_w, by + 6,
+                               outline=_blend(BG, color, 0.4))
+            fill_w = track_w * max(0.0, min(100.0, val)) / 100.0
+            bar_col = RED if val >= 85 else (GOLD if val >= 65 else color)
+            if fill_w > 0:
+                c.create_rectangle(track_x, by - 6, track_x + fill_w, by + 6,
+                                   fill=bar_col, outline="")
+            c.create_text(track_x + track_w + 10, by, text=f"{val:.0f}%",
+                          fill=_blend(BG, color, 0.6), font=("Consolas", 10), anchor="w")
+            by += 26
+
+        # ── Dernieres memoires enregistrees (bas droite) ───────────────────
+        # Place au-dessus du widget "Amah ecoute" (amah_listener.py, ~80px,
+        # coin bas-droit) pour eviter tout chevauchement.
+        my = H - 220
+        c.create_line(W - 22, my - 26, W - 22, my + 64, fill=color, width=2)
+        c.create_text(W - 40, my, text="MEMOIRE", fill=color,
+                      font=("Consolas", 10, "bold"), anchor="e")
+        if self._recent_memories:
+            for mem in self._recent_memories[:3]:
+                my += 20
+                txt = mem if len(mem) <= 42 else mem[:41] + "…"
+                c.create_text(W - 40, my, text=txt, fill=_blend(BG, color, 0.6),
+                              font=("Consolas", 9), anchor="e")
+        else:
+            my += 20
+            c.create_text(W - 40, my, text="(aucune memoire enregistree)",
+                          fill=_blend(BG, color, 0.4),
+                          font=("Consolas", 9), anchor="e")
+
+        # ── Champ de saisie texte (Ctrl+T) ─────────────────────────────────
+        # Cadre + etiquette autour du tk.Entry place par _toggle_text_entry,
+        # pour le rendre clairement visible (fond sombre sinon peu contraste).
+        if self._text_entry_visible:
+            ex1, ex2 = W * 0.25, W * 0.75
+            ey1, ey2 = H * 0.91 - 17, H * 0.91 + 17
+            c.create_rectangle(ex1 - 4, ey1 - 4, ex2 + 4, ey2 + 4,
+                               outline=color, width=2)
+            c.create_text((ex1 + ex2) / 2, ey1 - 16,
+                          text="CHAMP TEXTE — Entree pour envoyer · Echap pour fermer",
+                          fill=color, font=("Consolas", 9, "bold"))
+
+        # ── Apercu webcam en direct (Ctrl+W) ───────────────────────────────
+        if self._webcam_active.is_set() and self._webcam_frame is not None:
+            from PIL import ImageTk
+            self._webcam_photo = ImageTk.PhotoImage(self._webcam_frame)
+            pw, ph = self._webcam_photo.width(), self._webcam_photo.height()
+            x2, y1 = W - 18, 70
+            x1, y2 = x2 - pw, y1 + ph
+            c.create_image(x2, y1, anchor="ne", image=self._webcam_photo)
+            c.create_rectangle(x1, y1, x2, y2, outline=color, width=1)
+            c.create_text(x2 - 6, y2 + 12, text="WEBCAM · EN DIRECT",
+                          fill=color, font=("Consolas", 9, "bold"), anchor="ne")
 
     def _make_grid(self, W, H):
         """Pré-rend la grille de points une seule fois en image PIL → PhotoImage."""
@@ -405,6 +622,35 @@ class AmahVoiceUI:
             self._mic_ready = False
             self._mic_error = str(e)
 
+    def _metrics_loop(self):
+        """Met a jour self._cpu/self._ram toutes les 2s (jauges bas-gauche)."""
+        try:
+            import psutil
+        except ImportError:
+            return
+        while self._running:
+            try:
+                self._cpu = psutil.cpu_percent(interval=1)
+                self._ram = psutil.virtual_memory().percent
+            except Exception:
+                time.sleep(2)
+
+    def _memories_loop(self):
+        """Recharge les dernieres memoires enregistrees toutes les 30s
+        (panneau bas-droite)."""
+        from tools.memory import get_memories
+        while self._running:
+            try:
+                res = get_memories()
+                if res.get("success"):
+                    self._recent_memories = [m["contenu"] for m in res.get("memories", [])[:3]]
+            except Exception:
+                pass
+            for _ in range(30):
+                if not self._running:
+                    return
+                time.sleep(1)
+
     def _listen_once(self):
         """Écoute une phrase (max 6s). Retourne le texte ou None."""
         if not self._mic_ready or self._sr is None:
@@ -455,37 +701,63 @@ class AmahVoiceUI:
             if not texte:
                 continue
 
-            texte = texte.strip()
+            self._process_user_text(texte.strip())
 
-            # Fermeture vocale
-            if any(w in texte.lower() for w in STOP_WORDS):
-                self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
-                speak("À bientôt.")
-                time.sleep(0.3)
-                self.root.after(0, self._quit)
-                return
+    def _process_user_text(self, texte: str):
+        """Traite un message (venant de la voix ou du champ texte) : appel
+        Groq + reponse parlee/affichee. Peut etre appele depuis _loop ou
+        depuis un thread declenche par la saisie texte (Ctrl+T)."""
+        # Fermeture vocale
+        if any(w in texte.lower() for w in STOP_WORDS):
+            self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
+            speak("À bientôt.")
+            time.sleep(0.3)
+            self.root.after(0, self._quit)
+            return
 
-            # Traitement
-            self.root.after(0, self._set_state, "PENSE", f'« {texte} »', "")
+        # Traitement
+        self.root.after(0, self._set_state, "PENSE", f'« {texte} »', "")
+        with self._chat_lock:
             reply, is_err = self._chat(texte)
 
-            short = reply if len(reply) <= 220 else reply[:217] + "…"
-            if is_err:
-                self.root.after(0, self._set_state, "ERREUR", f'« {texte} »', short)
-                time.sleep(2.5)
+        if self._pending_live_action:
+            # toggle_live_mode a ete demande : on parle la confirmation
+            # D'ABORD (SAPI), puis on bascule _start_live/_stop_live --
+            # sinon la synthese vocale et les flux audio Gemini
+            # (sounddevice) s'ouvrent en meme temps sur les memes
+            # peripheriques, ce qui fait planter la session Live juste
+            # apres son activation.
+            action = self._pending_live_action
+            self._pending_live_action = None
+            if reply and not is_err:
+                speak(reply[:450], speed=2)
+            # Efface un eventuel message de statut Groq (rotation de cle)
+            # laisse par _on_status pendant ce dernier echange.
+            self.root.after(0, self._user_var.set, "")
+            self.root.after(0, self._reply_var.set, "")
+            if action == "start":
+                self.root.after(0, self._start_live)
             else:
-                self.root.after(0, self._set_state, "REPOND", f'« {texte} »', short)
-                # speak() est bloquant : on attend la fin réelle de la voix
-                # au lieu d'estimer une durée, et on affiche l'erreur si la
-                # synthèse échoue plutôt que de l'avaler en silence.
-                voice_res = speak(reply[:450], speed=2)
-                if "error" in voice_res:
-                    self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
-                                    f"Voix indisponible : {voice_res['error'][:120]}")
-                    time.sleep(1.5)
+                self.root.after(0, self._stop_live)
+            return
 
-            if self._running:
-                self.root.after(0, self._set_state, "ECOUTE")
+        short = reply if len(reply) <= 220 else reply[:217] + "…"
+        if is_err:
+            self.root.after(0, self._set_state, "ERREUR", f'« {texte} »', short)
+            time.sleep(2.5)
+        else:
+            self.root.after(0, self._set_state, "REPOND", f'« {texte} »', short)
+            # speak() est bloquant : on attend la fin réelle de la voix
+            # au lieu d'estimer une durée, et on affiche l'erreur si la
+            # synthèse échoue plutôt que de l'avaler en silence.
+            voice_res = speak(reply[:450], speed=2)
+            if "error" in voice_res:
+                self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
+                                f"Voix indisponible : {voice_res['error'][:120]}")
+                time.sleep(1.5)
+
+        if self._running:
+            self.root.after(0, self._set_state, "ECOUTE")
 
     def _chat(self, text: str):
         """Retourne (reply: str, is_error: bool)."""
@@ -519,7 +791,26 @@ class AmahVoiceUI:
                 if "not in request.tools" in str(e) and tools is not TOOLS_DEFINITIONS:
                     tools = TOOLS_DEFINITIONS
                     return _call(msgs, tools)
-                raise
+
+                # Autre cas de 400 AVANT reponse : le modele a emis un appel
+                # d'outil malforme en texte brut (tool_use_failed). On execute
+                # quand meme l'outil reconstitue plutot que de remonter l'erreur.
+                repaired = repair_tool_use_failed(e)
+                if repaired is None:
+                    raise
+                name, args = repaired
+                tc = SimpleNamespace(id="call_fixed",
+                                      function=SimpleNamespace(name=name, arguments=json.dumps(args, ensure_ascii=False)))
+                msgs.append({
+                    "role":    "assistant",
+                    "content": "",
+                    "tool_calls": [{"id": tc.id, "type": "function",
+                                    "function": {"name": name, "arguments": tc.function.arguments}}],
+                })
+                res = self._run_tool(tc, on_status=_on_status)
+                msgs.append({"role": "tool", "tool_call_id": tc.id, "content": res})
+                tools = TOOLS_DEFINITIONS
+                return _call(msgs, tools)
 
         try:
             resp = _call_safe(self.messages)
@@ -555,6 +846,16 @@ class AmahVoiceUI:
             args = json.loads(tc.function.arguments) or {}
         except Exception:
             args = {}
+
+        if tc.function.name == "toggle_live_mode":
+            return self._tool_toggle_live(args)
+
+        if tc.function.name == "toggle_webcam_preview":
+            return self._tool_toggle_webcam_preview(args)
+
+        if tc.function.name == "toggle_text_entry":
+            return self._tool_toggle_text_entry(args)
+
         func = TOOL_FUNCTIONS.get(tc.function.name)
         if not func:
             return json.dumps({"error": f"Outil inconnu: {tc.function.name}"})
@@ -565,6 +866,43 @@ class AmahVoiceUI:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    def _tool_toggle_live(self, args) -> str:
+        # La bascule reelle (_start_live/_stop_live) est appliquee par _loop
+        # APRES la confirmation vocale (speak), pour eviter que la synthese
+        # SAPI et les flux audio Gemini (sounddevice) ne s'ouvrent en meme
+        # temps sur les memes peripheriques.
+        activer = args.get("activer", True)
+        if activer:
+            if self._live_mode:
+                return json.dumps({"info": "Le mode Live est deja actif."}, ensure_ascii=False)
+            if not GEMINI_API_KEY:
+                return json.dumps({"error": "Mode Live indisponible : cle GEMINI_API_KEY manquante dans .env"}, ensure_ascii=False)
+            self._pending_live_action = "start"
+            return json.dumps({"success": True, "message": "Mode Live (Gemini) en cours d'activation."}, ensure_ascii=False)
+        else:
+            if not self._live_mode:
+                return json.dumps({"info": "Le mode Live n'est pas actif."}, ensure_ascii=False)
+            self._pending_live_action = "stop"
+            return json.dumps({"success": True, "message": "Mode Live desactive, retour au mode normal."}, ensure_ascii=False)
+
+    def _tool_toggle_webcam_preview(self, args) -> str:
+        activer = bool(args.get("activer", True))
+        if activer == self._webcam_active.is_set():
+            etat = "deja affiche" if activer else "deja masque"
+            return json.dumps({"info": f"Apercu webcam {etat}."}, ensure_ascii=False)
+        self.root.after(0, self._toggle_webcam_preview)
+        etat = "affiche" if activer else "masque"
+        return json.dumps({"success": True, "message": f"Apercu webcam {etat}."}, ensure_ascii=False)
+
+    def _tool_toggle_text_entry(self, args) -> str:
+        activer = bool(args.get("activer", True))
+        if activer == self._text_entry_visible:
+            etat = "deja affiche" if activer else "deja masque"
+            return json.dumps({"info": f"Champ texte {etat}."}, ensure_ascii=False)
+        self.root.after(0, self._toggle_text_entry)
+        etat = "affiche" if activer else "masque"
+        return json.dumps({"success": True, "message": f"Champ texte {etat}."}, ensure_ascii=False)
+
     # ── Mode Live (Gemini, audio temps réel) ─────────────────────────────────
 
     def _toggle_live(self):
@@ -574,6 +912,7 @@ class AmahVoiceUI:
             self._start_live()
 
     def _start_live(self):
+        _log(f"_start_live appele (live_mode={self._live_mode})")
         if self._live_mode:
             return
         if not GEMINI_API_KEY:
@@ -593,12 +932,15 @@ class AmahVoiceUI:
             self.root.after(0, self._on_live_status, s)
 
         def _user_text(t):
+            _log(f"_user_text: {t!r}")
             self.root.after(0, self._user_var.set, f'« {t} »')
 
         def _reply_text(t):
+            _log(f"_reply_text: {t!r}")
             self.root.after(0, self._reply_var.set, t)
 
         def _tool(name, args, result):
+            _log(f"_tool: {name} args={args!r}")
             self.root.after(0, self._reply_var.set, f"[outil] {name}…")
 
         self._live_session = GeminiLiveSession(
@@ -614,14 +956,23 @@ class AmahVoiceUI:
             deadline = time.time() + 2
             while self._listening_active.is_set() and time.time() < deadline:
                 time.sleep(0.05)
+            _log(f"_launch: demarrage GeminiLiveSession.start() "
+                 f"(listening_active={self._listening_active.is_set()})")
             self._live_session.start()
 
         threading.Thread(target=_launch, daemon=True).start()
 
     def _on_live_status(self, status):
+        _log(f"_on_live_status: live_mode={self._live_mode} status={status!r}")
         if not self._live_mode:
             return   # mode Live deja arrete -- on ignore les statuts tardifs
         if status.startswith("Erreur Live"):
+            # Stoppe vraiment la session avant d'oublier la reference --
+            # sinon le thread asyncio/sounddevice de Gemini continue de
+            # tourner en arriere-plan (zombie) et entre en conflit avec le
+            # micro de l'ecoute normale qui reprend juste apres.
+            if self._live_session:
+                self._live_session.stop()
             self._live_mode = False
             self._live_session = None
             self._set_state("ERREUR", "", status[:160])
@@ -640,6 +991,82 @@ class AmahVoiceUI:
         self._live_mode = False
         self._set_state("ECOUTE")
 
+    # ── Apercu webcam en direct ──────────────────────────────────────────────
+
+    def _toggle_webcam_preview(self):
+        if self._webcam_active.is_set():
+            self._webcam_active.clear()
+            self._webcam_frame = None
+            self._webcam_photo = None
+        else:
+            self._webcam_active.set()
+            threading.Thread(target=self._webcam_loop, daemon=True).start()
+
+    def _webcam_loop(self):
+        """Tourne dans un thread dedie : lit la webcam partagee en continu et
+        stocke la derniere image PIL dans self._webcam_frame. La conversion
+        en PhotoImage Tk (non thread-safe) est faite par _draw() dans le
+        thread UI."""
+        from tools import webcam as webcam_mod
+        try:
+            import cv2
+            from PIL import Image
+        except Exception:
+            self._webcam_active.clear()
+            return
+        cap = webcam_mod.acquire()
+        if cap is None:
+            self._webcam_active.clear()
+            return
+        try:
+            while self._webcam_active.is_set() and self._running:
+                frame = webcam_mod.read_locked()
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(rgb).transpose(Image.FLIP_LEFT_RIGHT)
+                img.thumbnail((220, 165))
+                self._webcam_frame = img
+                time.sleep(0.04)
+        finally:
+            webcam_mod.release()
+
+    # ── Champ de saisie texte (Ctrl+T) ───────────────────────────────────────
+
+    def _toggle_text_entry(self):
+        if self._text_entry_visible:
+            self._hide_text_entry()
+        else:
+            self._text_entry.place(relx=0.5, rely=0.91, relwidth=0.5, height=34, anchor="center")
+            self._text_entry.focus_set()
+            self._text_entry_visible = True
+
+    def _hide_text_entry(self, event=None):
+        self._text_var.set("")
+        self._text_entry.place_forget()
+        self._text_entry_visible = False
+        self.root.focus_force()
+        return "break"
+
+    def _submit_text(self, event=None):
+        texte = self._text_var.get().strip()
+        if not texte:
+            return
+        self._text_var.set("")
+        self._text_entry.place_forget()
+        self._text_entry_visible = False
+        self.root.focus_force()
+
+        if self._live_mode:
+            if self._live_session and self._live_session.send_text(texte):
+                self._user_var.set(f'« {texte} »')
+                self._reply_var.set("")
+            else:
+                self._set_state("ERREUR", "", "Mode Live : session non prete pour le texte.")
+        else:
+            threading.Thread(target=self._process_user_text, args=(texte,), daemon=True).start()
+
     # ── Contrôles ─────────────────────────────────────────────────────────────
 
     def _toggle_fs(self):
@@ -648,6 +1075,7 @@ class AmahVoiceUI:
 
     def _quit(self):
         self._running = False
+        self._webcam_active.clear()
         if self._live_session:
             self._live_session.stop()
         try:

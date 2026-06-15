@@ -8,8 +8,9 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from groq import Groq
-from groq_client import GroqClient
+from groq_client import GroqClient, repair_tool_use_failed
 from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
@@ -790,9 +791,12 @@ class AmahGUI:
         self._typewrite(reply + "\n\n", "amah_txt", callback=self._after_reply)
 
     def _typewrite(self, text: str, tag: str, callback=None):
-        """Affiche le texte progressivement (effet machine a ecrire, ~1.2 sec total)."""
-        tick_ms = 20
-        n_ticks = 60
+        """Affiche le texte progressivement (effet machine a ecrire, ~0.1 sec total).
+        Reduit de ~1.2s a ~0.1s : ce delai etait purement cosmetique et s'ajoutait
+        a chaque reponse 70B, au-dessus de la latence reelle de l'API -- une
+        bonne partie de la "lenteur" ressentie n'etait pas du tout liee a Groq."""
+        tick_ms = 5
+        n_ticks = 20
         chunk   = max(1, len(text) // n_ticks)
         idx     = [0]
 
@@ -933,6 +937,26 @@ class AmahGUI:
         self._write(("\n", "dim"))
 
     # ── Moteur de chat ────────────────────────────────────────────────────────
+
+    def _retry_with_repaired_tool_call(self, repaired):
+        """Execute l'appel d'outil recupere par repair_tool_use_failed(), ajoute
+        son resultat a la conversation, et relance Groq pour obtenir une vraie
+        reponse au lieu de l'erreur 400 brute."""
+        name, args = repaired
+        tc = SimpleNamespace(id="call_fixed",
+                              function=SimpleNamespace(name=name, arguments=json.dumps(args, ensure_ascii=False)))
+        self.messages.append({
+            "role":    "assistant",
+            "content": "",
+            "tool_calls": [{"id": tc.id, "type": "function",
+                            "function": {"name": name, "arguments": tc.function.arguments}}],
+        })
+        result = self._execute_tool(tc)
+        if len(result) > 2000:
+            result = result[:2000] + "\n...[tronqué pour économiser les tokens]"
+        self.messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+        self._trim_messages()
+        return self._groq_call(self.messages, tools=TOOLS_DEFINITIONS, model_override=MODEL)
 
     def _execute_tool(self, tool_call) -> str:
         name = tool_call.function.name
@@ -1185,7 +1209,7 @@ class AmahGUI:
         "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
         "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf","summarize"},
         "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
-        "email":     {"read_emails","send_email","search_emails","draft_email"},
+        "email":     {"read_emails","send_email","search_emails","draft_email","open_browser","get_page_text","click_text"},
         "memoire":   {"save_memory","get_memories","delete_memory"},
         "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},
         "code":      {"write_code","run_code","explain_code","read_file","write_file","edit_file"},
@@ -1293,7 +1317,13 @@ class AmahGUI:
                 response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
                                            model_override=MODEL)
             else:
-                raise
+                # Autre cas de 400 AVANT reponse : le modele a emis un appel
+                # d'outil malforme en texte brut (tool_use_failed). On tente
+                # de le reparer plutot que de remonter l'erreur brute.
+                repaired = repair_tool_use_failed(e)
+                if repaired is None:
+                    raise
+                response = self._retry_with_repaired_tool_call(repaired)
 
         # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous (70B)
         if response.choices[0].finish_reason == "tool_calls":
@@ -1332,8 +1362,25 @@ class AmahGUI:
                 })
 
             self._trim_messages()
-            response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
-                                       model_override=MODEL)  # toujours 70B pour tool use
+            # Reutilise la sous-liste d'outils ciblee (et non TOOLS_DEFINITIONS,
+            # ~4200 tokens pour les 99 outils) pour eviter de depasser le TPM
+            # Groq (12000) sur les enchainements multi-outils -- avec repli sur
+            # la liste complete si le modele reclame un outil hors de cette sous-liste.
+            try:
+                response = self._groq_call(self.messages, tools=tools,
+                                           model_override=MODEL)  # toujours 70B pour tool use
+            except Exception as e:
+                if "not in request.tools" in str(e):
+                    response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                                               model_override=MODEL)
+                else:
+                    raise
+            if response.choices[0].finish_reason == "tool_calls":
+                tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
+                available  = {t["function"]["name"] for t in (tools or [])}
+                if not tool_names.issubset(available):
+                    response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                                               model_override=MODEL)
 
         return response.choices[0].message.content
 
