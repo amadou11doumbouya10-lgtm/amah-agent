@@ -7,8 +7,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/IA-Groq%20%7C%20Llama%203.3-orange" />
-  <img src="https://img.shields.io/badge/Outils-87-gold" />
-  <img src="https://img.shields.io/badge/Version-1.4.2-C8A96E" />
+  <img src="https://img.shields.io/badge/Mode%20Live-Gemini-9B59B6" />
+  <img src="https://img.shields.io/badge/Outils-99-gold" />
+  <img src="https://img.shields.io/badge/Version-1.5.0-C8A96E" />
   <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D4?logo=windows" />
   <img src="https://img.shields.io/badge/Interface-tkinter-green" />
   <img src="https://img.shields.io/badge/Licence-Propriétaire-red" />
@@ -30,7 +31,9 @@ Il peut interagir concrètement avec le système — fichiers, emails, navigateu
 > *"Lis mes derniers emails"* → Amah ouvre Gmail et les lit.  
 > *"Lance une vidéo YouTube sur Python"* → Amah ouvre YouTube.  
 > *"Cherche un vol Paris→New York pour juillet"* → Amah ouvre Google Flights.  
-> *"Règle le volume à 60%"* → Amah ajuste le son.
+> *"Règle le volume à 60%"* → Amah ajuste le son.  
+> *"Lance Cyberpunk sur Steam"* → Amah ouvre le launcher et lance le jeu.  
+> *"Amah, fais X, Y puis Z"* → execute_plan génère et exécute un plan multi-étapes automatiquement.
 
 Contrairement aux assistants en ligne, **Amah fonctionne localement**, les données restent sur le PC, et elle se souvient de tout entre les sessions.
 
@@ -44,8 +47,9 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 | 📄 **Documents** | Créer Word, PDF, TXT — les lire et résumer |
 | 🌐 **Internet** | Recherche DuckDuckGo, lecture de pages web |
 | 📧 **Email Gmail** | Lire, envoyer, chercher, rédiger un brouillon |
-| 🌍 **Navigateur** | Piloter Chrome (clic, formulaire, screenshot) |
+| 🌍 **Navigateur** | Profil persistant (cookies/connexions conservées), clic/formulaire/screenshot, navigation par texte visible (`click_text`, `type_in_field`) sans sélecteur CSS |
 | 🎙️ **Interface vocale** | HUD animé style Amah — parle, Amah répond à voix haute |
+| 🗣️ **Mode Live (Gemini)** | Conversation orale temps réel (F9), interruption naturelle, 33 outils vocaux |
 | 🔊 **Voix** | Synthèse vocale Windows + reconnaissance micro |
 | 📊 **Excel** | Lire, créer, modifier des fichiers Excel |
 | 🧠 **Mémoire** | Se souvenir entre les sessions (SQLite) |
@@ -58,12 +62,14 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 | 🔊 **Hardware** | Volume, luminosité, WiFi on/off |
 | 🎬 **YouTube** | Ouvrir une vidéo, chercher, lancer de la musique |
 | ✈️ **Vols** | Comparer des vols + ouvrir Google Flights |
-| 🗂️ **Plan multi-étapes** | Planifier automatiquement les tâches complexes |
+| 🗂️ **Plan multi-étapes** | `create_plan` (générer) et `execute_plan` (générer ET exécuter, avec retry et confirmation pour les actions sensibles) |
 | 💻 **Code** | Écrire, exécuter et expliquer du code |
 | ⏰ **Planificateur** | Tâches automatiques Windows Task Scheduler |
 | 🔐 **Licence** | Système de licence offline lié au hardware |
+| 🎮 **Jeux** | Lancer/installer/chercher des jeux Steam, ouvrir Epic Games |
+| 📷 **Vision webcam** | Analyser l'image webcam par IA + auto-mute confidentialité (coupe le son si plusieurs personnes détectées) |
 
-**Total : 87 outils opérationnels.**
+**Total : 99 outils opérationnels.**
 
 ---
 
@@ -88,11 +94,14 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 <td width="50%">
 
 ### Interface vocale HUD (voice_fullscreen.py)
-- Fenêtre animée style Amah (orbe + anneaux rotatifs)
+- Fenêtre animée style Amah (orbe + anneaux rotatifs, jauges CPU/RAM, horloge, panneau MEMOIRE)
 - États colorés : ECOUTE (or) / TRAITEMENT (cyan) / ERREUR (rouge)
 - Barres audio animées pendant l'écoute
 - Transcription affichée avant envoi
 - Réponse automatique à voix haute
+- Champ de saisie texte (Ctrl+T) pour écrire au lieu de parler
+- **Mode Live Gemini (touche F9)** — HUD violet, conversation orale temps réel
+  bidirectionnelle, interruption naturelle
 - Mot de réveil **"Amah"** (amah_listener.py, détection Levenshtein)
 
 </td>
@@ -105,19 +114,23 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 
 ```
 Cerveau IA   : Groq API — llama-3.3-70b-versatile (tâches) / llama-3.1-8b-instant (questions simples)
-Vision IA    : Groq meta-llama/llama-4-scout-17b-16e-instruct (analyze_screen)
-Plan IA      : Groq llama-3.3-70b + JSON mode (create_plan)
-Client Groq  : groq_client.py — singleton partagé, rotation 3 clés, retry backoff (timeout + 503)
+Mode Live    : Gemini 2.5 Flash (native-audio) — conversation orale temps réel (F9), 33 outils
+Vision IA    : Groq meta-llama/llama-4-scout-17b-16e-instruct (analyze_screen, analyze_webcam)
+Plan IA      : Groq llama-3.3-70b + JSON mode (create_plan / execute_plan)
+Client Groq  : groq_client.py — singleton partagé, rotation 3 clés, retry backoff (timeout + 503),
+               repair_tool_use_failed() (récupère les pseudo-appels d'outils mal formés de Llama 3.3)
 Interface    : Python tkinter (natif, thème or/sombre personnalisé)
-Interface HUD: voice_fullscreen.py — canvas animé (orbe, anneaux, radar, barres audio)
+Interface HUD: voice_fullscreen.py — canvas animé (orbe, anneaux, radar, barres audio, mode Live violet)
 Mémoire      : SQLite — conversations + mémoire explicite + stats
 Email        : SMTP/IMAP Gmail (mot de passe d'application)
-Navigateur   : Playwright + Chromium (headless=False)
+Navigateur   : Playwright + Edge/Chromium, profil persistant (browser_profile/), navigation par
+               texte visible (click_text/type_in_field)
 Traduction   : deep-translator (Google Translate)
 Excel        : openpyxl
 Images       : Pillow
 Voix sortie  : Windows System.Speech (natif, sans dépendance)
 Voix entrée  : SpeechRecognition + Google STT (internet requis)
+Audio Live   : sounddevice + asyncio (micro 16kHz <-> haut-parleurs 24kHz)
 Hardware     : WinMM API + WMI + netsh via PowerShell
 Packaging    : PyInstaller → .exe standalone ~150 Mo
 ```
@@ -129,22 +142,24 @@ Packaging    : PyInstaller → .exe standalone ~150 Mo
 ```
 amah-agent/
 ├── gui.py                    ← Interface graphique principale (chat + HUD)
-├── voice_fullscreen.py       ← Interface vocale HUD plein écran animée
-├── voice_ui.py               ← Composant canvas voix intégré au GUI
+├── voice_fullscreen.py       ← Interface vocale HUD plein écran animée (+ mode Live F9)
 ├── amah_listener.py          ← Détection mot de réveil "Amah" (Levenshtein)
 ├── agent.py                  ← Interface terminal
-├── config.py                 ← 87 définitions d'outils (TOOLS_DEFINITIONS)
-├── groq_client.py            ← Client Groq singleton (rotation clés, retry backoff)
+├── config.py                 ← 99 définitions d'outils (TOOLS_DEFINITIONS)
+├── groq_client.py            ← Client Groq singleton (rotation clés, retry backoff, repair_tool_use_failed)
+├── gemini_client.py          ← Session Gemini Live (pont audio micro/haut-parleurs, function calling)
+├── gemini_tools.py           ← Sous-ensemble de 33 outils + adaptateur de schéma pour Gemini Live
 ├── system_prompt.txt         ← Texte du prompt système (éditable sans toucher au code)
+├── docs/AMAH_SELF.md          ← Fiche condensée d'auto-connaissance (architecture, outils, roadmap)
 ├── tools/
-│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (87 outils, génération dynamique)
+│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (99 outils, génération dynamique)
 │   ├── files.py              ← Fichiers/dossiers (12 outils)
 │   ├── documents.py          ← Word, PDF, TXT (4 outils)
 │   ├── search.py             ← DuckDuckGo + lecture web (2 outils)
 │   ├── system.py             ← Infos système, PowerShell (4 outils)
 │   ├── memory.py             ← SQLite (conversations + memories) (3 outils)
 │   ├── email_tool.py         ← Gmail SMTP/IMAP (4 outils)
-│   ├── browser.py            ← Playwright Chrome (5 outils)
+│   ├── browser.py            ← Playwright Edge/Chromium, profil persistant (7 outils)
 │   ├── voice.py              ← Synthèse vocale Windows (1 outil)
 │   ├── voice_recognition.py  ← Reconnaissance vocale (2 outils)
 │   ├── notifications.py      ← Notifications + rappels (2 outils)
@@ -165,7 +180,10 @@ amah-agent/
 │   ├── youtube_tool.py       ← YouTube + musique (3 outils)
 │   ├── code_tools.py         ← Écriture, exécution, explication code (3 outils)
 │   ├── flight_finder.py      ← Vols + Google Flights (1 outil)
-│   └── planner.py            ← Planification multi-étapes (1 outil)
+│   ├── planner.py            ← create_plan / execute_plan (2 outils)
+│   ├── games.py              ← Lanceur Steam/Epic Games (6 outils)
+│   ├── webcam_vision.py      ← Analyse webcam par IA (1 outil)
+│   └── webcam_guard.py       ← Auto-mute confidentialité webcam (2 outils)
 └── dist/
     └── Amah Agent.exe        ← Livrable client (~150 Mo)
 ```
@@ -220,6 +238,7 @@ Le dossier `dist/` contient tout le livrable :
 
 | Version | Date | Nouveautés |
 |---------|------|-----------|
+| v1.5.0 | 11/06/2026 | 99 outils. Lanceur de jeux Steam/Epic (6 outils), vision webcam + auto-mute confidentialité (3 outils), execute_plan (exécution automatique de plan multi-étapes avec retry + confirmation), navigation web par texte visible (click_text/type_in_field), mode vocal temps réel Gemini Live (touche F9, 33 outils, interruption naturelle) |
 | v1.4.2 | 08/06/2026 | Streaming réponses simples, GroqClient centralisé + retry timeout, fix vision (llama-4-scout), fix placeholder "réfléchit...", secret licence fail-closed, logging blocs except silencieux, TOOL_FUNCTIONS dynamique, system_prompt.txt externalisé, clé ElevenLabs migrée dans .env |
 | v1.4.1 | 07/06/2026 | Fix routage outils (normalisation accents météo/traduction), sécurité tool routing renforcée |
 | v1.4.0 | 05/06/2026 | +11 outils (hardware, vision, YouTube, vols, planificateur), interface vocale HUD animée, mot de réveil "Amah", monitoring CPU/RAM, effet machine à écrire |
