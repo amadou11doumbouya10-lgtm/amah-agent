@@ -354,7 +354,14 @@ class AmahGUI:
                  bg=BG2, fg=TEXT3, font=("Consolas", 8))
         self._metrics_lbl.pack(side=tk.LEFT, padx=14)
 
-        tk.Label(sb, text="Shift+Entrée = newline  ·  Ctrl+R = reset  ·  87 outils  ·  v1.5",
+        from groq_client import GroqClient
+        _backend = GroqClient.get().backend
+        _backend_color = "#00d4ff" if _backend == "LiteLLM" else TEXT3
+        self._backend_lbl = tk.Label(sb, text=f"[{_backend}]",
+                 bg=BG2, fg=_backend_color, font=("Consolas", 8, "bold"))
+        self._backend_lbl.pack(side=tk.RIGHT, padx=(0, 6))
+
+        tk.Label(sb, text="Shift+Entrée = newline  ·  Ctrl+R = reset  ·  99 outils  ·  v1.5",
                  bg=BG2, fg=TEXT3, font=("Consolas", 8), anchor="e"
                  ).pack(side=tk.RIGHT, padx=14)
 
@@ -466,6 +473,15 @@ class AmahGUI:
 
     def _nav_settings(self):
         self._write(("\n  Paramètres : édite le fichier .env pour changer les clés API.\n\n", "dim"))
+
+    def _refresh_backend_lbl(self):
+        """Met a jour le badge [Groq] / [LiteLLM] si un fallback s'est produit."""
+        if not hasattr(self, '_backend_lbl'):
+            return
+        from groq_client import GroqClient
+        _backend = GroqClient.get().backend
+        _color   = "#00d4ff" if _backend == "LiteLLM" else TEXT3
+        self._backend_lbl.config(text=f"[{_backend}]", fg=_color)
 
     def _pulse_dot(self):
         """Anime le point de statut dans la topbar (pulse lent)."""
@@ -818,6 +834,7 @@ class AmahGUI:
         self._write_separator()
         self._unlock()
         self._set_status("[OK] Pret")
+        self._refresh_backend_lbl()
         # Si la question venait du micro, Amah répond aussi à voix haute
         if self._voice_mode and self._last_reply:
             self._voice_mode = False
@@ -1268,7 +1285,7 @@ class AmahGUI:
         """
         return self.groq.chat(
             messages, model=model_override or MODEL, tools=tools,
-            max_tokens=1024, temperature=0.4,
+            max_tokens=4096, temperature=0.4,
             on_status=lambda txt: self.root.after(0, self._set_status, txt),
         )
 

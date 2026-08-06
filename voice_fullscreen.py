@@ -669,12 +669,18 @@ class AmahVoiceUI:
             return self._sr.recognize_google(audio, language="fr-FR")
         except sr.UnknownValueError:
             return None   # parole incomprise
-        except sr.RequestError as e:
-            # Vrai problème (pas de réseau, API Google indisponible…) : à signaler
-            self.root.after(0, self._set_state, "ERREUR", "",
-                            f"Reconnaissance vocale indisponible : {str(e)[:120]}")
-            time.sleep(2.0)
-            return None
+        except sr.RequestError:
+            # Coupure DNS/reseau passagere (getaddrinfo failed...) : on retente
+            # une fois avant de signaler une vraie panne a l'utilisateur.
+            try:
+                return self._sr.recognize_google(audio, language="fr-FR")
+            except sr.UnknownValueError:
+                return None
+            except sr.RequestError as e:
+                self.root.after(0, self._set_state, "ERREUR", "",
+                                f"Reconnaissance vocale indisponible : {str(e)[:120]}")
+                time.sleep(2.0)
+                return None
 
     def _start_loop(self):
         threading.Thread(target=self._loop, daemon=True).start()
@@ -729,6 +735,13 @@ class AmahVoiceUI:
             # apres son activation.
             action = self._pending_live_action
             self._pending_live_action = None
+            # Pose le flag tout de suite (synchrone, dans ce thread) -- sinon
+            # _loop revient en haut de sa boucle pendant que _start_live est
+            # seulement planifie via root.after (asynchrone, thread Tk) et
+            # rouvre le micro Groq juste avant que Gemini ouvre le sien :
+            # les deux flux audio se retrouvent ouverts en meme temps sur le
+            # meme peripherique.
+            self._live_mode = (action == "start")
             if reply and not is_err:
                 speak(reply[:450], speed=2)
             # Efface un eventuel message de statut Groq (rotation de cle)
@@ -776,7 +789,7 @@ class AmahVoiceUI:
         def _call(msgs, tl):
             return self.client.chat(
                 messages=msgs, model=model, tools=tl,
-                max_tokens=1024, temperature=0.4,
+                max_tokens=4096, temperature=0.4,
                 on_status=_on_status,
             )
 
@@ -913,15 +926,17 @@ class AmahVoiceUI:
 
     def _start_live(self):
         _log(f"_start_live appele (live_mode={self._live_mode})")
-        if self._live_mode:
-            return
+        if self._live_session is not None:
+            return  # deja demarree (ex: _live_mode pose en avance par _process_user_text)
         if not GEMINI_API_KEY:
+            self._live_mode = False
             self._set_state("ERREUR", "",
                             "Mode Live indisponible : GEMINI_API_KEY manquante dans .env")
             return
         try:
             from gemini_client import GeminiLiveSession
         except Exception as e:
+            self._live_mode = False
             self._set_state("ERREUR", "", f"Module Gemini indisponible : {e}")
             return
 

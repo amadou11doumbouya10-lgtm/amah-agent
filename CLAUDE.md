@@ -5,7 +5,7 @@ Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit) + mode vocal
 temps réel Gemini Live. 99 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
-Version actuelle : **v1.5.0**
+Version actuelle : **v1.5.1**
 
 ## Structure
 ```
@@ -14,7 +14,8 @@ amah-agent/
 ├── gui.py                    ← Interface graphique tkinter (écran config + chat)
 ├── voice_fullscreen.py       ← Interface vocale plein écran (HUD, mode normal + mode Live F9)
 ├── amah_listener.py          ← Mot de réveil "Amah" (widget discret, lance voice_fullscreen)
-├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés)
+├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés,
+│                                 repli dev sur proxy LiteLLM via LITELLM_URL)
 ├── gemini_tools.py           ← Sous-ensemble 33 outils + adaptateur schema pour Gemini Live
 ├── gemini_client.py          ← Session Gemini Live (audio temps réel + function calling)
 ├── config.py                 ← Modèle, système prompt, 99 définitions outils
@@ -41,7 +42,8 @@ amah-agent/
 │   ├── memory.py             ← Mémoire SQLite persistante (3 outils)
 │   ├── email_tool.py         ← Email Gmail SMTP/IMAP (3 outils)
 │   ├── browser.py            ← Navigation web Playwright (5 outils)
-│   ├── voice.py              ← Synthèse vocale Windows (1 outil)
+│   ├── voice.py              ← Synthèse vocale edge-tts (voix Henri), repli
+│   │                            Windows System.Speech si edge-tts echoue (1 outil)
 │   ├── notifications.py      ← Notifications + rappels (2 outils)
 │   ├── excel.py              ← Lecture/création Excel (3 outils)
 │   ├── clipboard.py          ← Presse-papiers (2 outils)
@@ -117,6 +119,16 @@ build.bat                                 # compiler le .exe pour distribution
 - Ou double-clic sur developpeur/generate_license.bat
 - Clé secrète dans .env (AMAH_LICENSE_SECRET)
 
+### LiteLLM (optionnel, usage développeur uniquement)
+- LITELLM_URL dans .env (ex: http://localhost:4000) active un proxy LiteLLM
+  local en remplacement de Groq direct — quota illimité, failover multi-providers
+- Invisible pour les clients : ils n'ont pas LITELLM_URL dans leur .env, donc
+  toujours sur Groq direct
+- Si le proxy n'est pas lancé (connexion refusée), repli silencieux et
+  automatique sur Groq direct dans groq_client.py
+- Config/scripts de lancement (litellm_config.yaml, start_litellm.bat/py) sont
+  gitignorés — jamais livrés aux clients
+
 ## Modèles utilisés (routage automatique)
 - **Questions simples** (≤6 mots, salutation) : `llama-3.1-8b-instant` (~0.3s)
 - **Tâches avec outils** : `llama-3.3-70b-versatile` (~2s)
@@ -149,7 +161,7 @@ take_screenshot(path), get_page_text(), click_text(texte), type_in_field(label, 
 Les deux derniers ciblent par texte/label visible — pas de sélecteur CSS requis.
 
 ### Voix — tools/voice.py (1)
-speak(text, speed)
+speak(text, speed) — edge-tts (voix Henri, fr-FR), repli Windows TTS hors ligne si echec
 
 ### Notifications — tools/notifications.py (2)
 send_notification(title, message, duration), set_reminder(message, minutes)
@@ -177,6 +189,7 @@ get_weather(location), get_weather_simple(location)
 
 ### Traduction — tools/translator.py (2)
 translate(text, to_lang), detect_language(text)
+Textes longs decoupes automatiquement en morceaux de 4500 caracteres (limite GoogleTranslator ~5000)
 
 ### QR Code — tools/qrcode_tool.py (1)
 create_qrcode(text, output, size)
@@ -389,6 +402,45 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
     micro classique libéré proprement pendant le mode Live
   - GEMINI_API_KEY dans .env / .env.example
 - [x] **99 outils au total**, documentés dans docs/CAPACITES_AMAH.md
+
+## Etat — v1.5.1 (06/08/2026)
+- [x] **Repli dev sur proxy LiteLLM** (groq_client.py) : LITELLM_URL dans
+  .env bascule GroqClient sur un proxy LiteLLM local (quota illimité,
+  failover multi-providers) — invisible pour les clients (pas de
+  LITELLM_URL dans leur .env = toujours Groq direct). Repli automatique et
+  silencieux sur Groq si le proxy n'est pas lancé (connexion refusée).
+  Réparation `tool_use_failed` étendue au format d'erreur LiteLLM/OpenAI SDK
+  (JSON extrait par comptage de profondeur d'accolades, pas de regex
+  gourmande — le message LiteLLM contient du texte après le JSON qui
+  cassait une regex `r'\{.*\}'`). Distinction quota journalier épuisé
+  (fail immédiat, "TPD") vs rate-limit par minute (retry avec backoff).
+  Badge `[Groq]`/`[LiteLLM]` dans la barre de statut de gui.py.
+- [x] **Synthèse vocale edge-tts** (tools/voice.py) : voix Henri (fr-FR)
+  via edge-tts au lieu de Windows System.Speech, avec repli automatique sur
+  le TTS Windows hors ligne si edge-tts échoue (2 tentatives). Lecture MP3
+  bloquante via COM System.Windows.Media.MediaPlayer.
+- [x] **Traduction de textes longs** (tools/translator.py) : découpage
+  automatique par paragraphes en morceaux de 4500 caractères pour respecter
+  la limite ~5000 caractères de GoogleTranslator.
+- [x] **max_tokens** 1024 → 4096 (gui.py, voice_fullscreen.py) : évite les
+  réponses tronquées sur les tâches à plusieurs outils/étapes.
+- [x] System prompt : règle "fichiers code" (write_file/edit_file
+  obligatoire pour .html/.css/.js/.py/.json/.md — create_txt réservé aux
+  notes brutes, il ajoute ".txt" et casse les fichiers web/code) et règle
+  "créateur" (ne citer Amadou Doumbouya que si on le demande explicitement,
+  pas dans un "qui es-tu" générique).
+- [x] Mot de réveil "Amah" (amah_listener.py) : seuils resserrés
+  (energy_threshold 250→200, pause_threshold 0.5→0.25s) pour une détection
+  plus rapide, reconnaissance fr-FR uniquement (fallback anglais retiré).
+- [x] voice_fullscreen.py : retry silencieux sur coupure réseau passagère
+  de la reconnaissance vocale avant de signaler une vraie panne ; fix
+  race condition au basculement mode Live (flag `_live_mode` posé de façon
+  synchrone au lieu d'attendre `root.after`, qui pouvait laisser le micro
+  Groq et le micro Gemini ouverts simultanément).
+- [x] gemini_client.py : voix Gemini Live changée pour "Charon".
+- [x] requirements.txt : ajout de `edge-tts` et `openai` (dépendances
+  manquantes, utilisées respectivement par tools/voice.py et le mode
+  LiteLLM de groq_client.py).
 
 ## Prochaines améliorations possibles
 - [ ] Licence entreprise volume (une clé pour N postes)

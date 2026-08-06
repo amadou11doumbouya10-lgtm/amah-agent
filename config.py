@@ -44,7 +44,7 @@ TOOLS_DEFINITIONS = [
     _f("summarize",       "Lit un fichier (pdf/docx/txt/code) pour en faire un résumé IA", {"path": _s("chemin du fichier a resumer")}, ["path"]),
     # Documents
     _f("create_word",     "Cree un fichier Word",               {"filename": _s("nom"), "title": _s("titre"), "content": _s("contenu"), "save_path": _s("dossier")}, ["filename","title","content"]),
-    _f("create_txt",      "Cree un fichier TXT",                {"filename": _s("nom"), "content": _s("contenu"), "save_path": _s("dossier")}, ["filename","content"]),
+    _f("create_txt",      "Cree une note .txt simple (ajoute .txt automatiquement). NE JAMAIS utiliser pour du code/html/css/js/json/md — utiliser write_file pour ca.", {"filename": _s("nom"), "content": _s("contenu"), "save_path": _s("dossier")}, ["filename","content"]),
     _f("create_pdf",      "Cree un fichier PDF",                {"filename": _s("nom"), "title": _s("titre"), "content": _s("contenu"), "save_path": _s("dossier")}, ["filename","title","content"]),
     _f("read_document",   "Lit Word/PDF/TXT",                   {"path": _s("chemin")}, ["path"]),
     # Recherche

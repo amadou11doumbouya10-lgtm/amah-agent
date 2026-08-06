@@ -48,6 +48,14 @@ browser_profile/
 # Logs de debug locaux
 live_debug.log
 *_debug.log
+voice_error.log
+
+# LiteLLM dev proxy (usage personnel uniquement, jamais pour les clients)
+litellm_config.yaml
+start_litellm.bat
+start_litellm.py
+litellm.log
+litellm_db.db
 
 # Fichiers média lourds (vidéos/audios de présentation)
 voix/*.mp4

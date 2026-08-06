@@ -163,7 +163,12 @@ class GeminiLiveSession:
                 parts=[types.Part(text=GEMINI_SYSTEM_INSTRUCTION)]
             ),
             tools=get_tools(),
-            speech_config=types.SpeechConfig(language_code="fr-FR"),
+            speech_config=types.SpeechConfig(
+                language_code="fr-FR",
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
+                ),
+            ),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             # Sensibilite max : un micro avec un faible niveau d'entree peut
@@ -251,23 +256,14 @@ class GeminiLiveSession:
                 )
         _log("_send_audio_loop: arret")
 
-    # ── Gemini -> Haut-parleurs + outils ─────────────────────────────────────
+    # ── Gemini -> Haut-parleurs (AUDIO) + outils ─────────────────────────────
 
     async def _receive_loop(self, session):
         loop = asyncio.get_event_loop()
         play_q: queue.Queue = queue.Queue()
         stop_play = threading.Event()
 
-        # Delai apres la fin de la lecture avant de reouvrir le micro --
-        # laisse le temps a l'echo residuel de s'eteindre. Reduit par
-        # rapport a 0.6 : un hangover trop long coupait le debut de la
-        # phrase suivante de l'utilisateur (mauvaise comprehension).
-        ECHO_HANGOVER = 0.35
-
-        # Nombre de blocs audio accumules avant de demarrer la lecture --
-        # absorbe les a-coups d'arrivee reseau et evite les craquements
-        # (sous-alimentation du flux audio). Cout : quelques dizaines de ms,
-        # negligeable face a la latence reseau de Gemini.
+        ECHO_HANGOVER   = 0.35
         PREBUFFER_CHUNKS = 3
 
         def _player():
@@ -277,10 +273,6 @@ class GeminiLiveSession:
                                          latency="high") as out:
                     _log("_player: haut-parleur demarre")
                     n = 0
-                    # Instant ou la lecture de toutes les trames deja ecrites
-                    # sera terminee (out.write() rend la main avant la fin
-                    # reelle de la lecture -- il faut estimer a partir de la
-                    # duree audio cumulee, pas de l'heure d'ecriture).
                     playback_end = 0.0
                     prebuffer: list = []
                     primed = False
@@ -305,7 +297,7 @@ class GeminiLiveSession:
                         for c in to_write:
                             self._speaking.set()
                             out.write(c)
-                            duration = len(c) / (RECEIVE_RATE * 2)  # 16 bits mono
+                            duration = len(c) / (RECEIVE_RATE * 2)
                             playback_end = max(playback_end, time.monotonic()) + duration
                             n += 1
                             if n == 1:
@@ -318,15 +310,10 @@ class GeminiLiveSession:
         player_thread = threading.Thread(target=_player, daemon=True)
         player_thread.start()
 
-        user_chunks: list[str] = []
+        user_chunks: list[str]  = []
         reply_chunks: list[str] = []
 
         try:
-            # session.receive() ne couvre qu'un seul "tour" : le generateur
-            # se termine de lui-meme apres turn_complete. Il faut le
-            # rappeler pour chaque nouveau tour, sinon la boucle se termine
-            # apres la 1ere reponse et _main ferme toute la session (le HUD
-            # reste alors bloque sur "MODE LIVE" sans plus rien recevoir).
             while not self._stop_event.is_set():
                 async for msg in session.receive():
                     if self._stop_event.is_set():
@@ -345,14 +332,13 @@ class GeminiLiveSession:
                                 if part.inline_data and part.inline_data.data:
                                     play_q.put_nowait(part.inline_data.data)
                         if sc.interrupted:
-                            # L'utilisateur a coupe la parole : on vide la file audio
                             while not play_q.empty():
                                 try:
                                     play_q.get_nowait()
                                 except queue.Empty:
                                     break
                         if sc.turn_complete:
-                            user_chunks = []
+                            user_chunks  = []
                             reply_chunks = []
                             self.on_status("ECOUTE")
 

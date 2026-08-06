@@ -220,9 +220,9 @@ class ListenerWidget:
             return
 
         r   = sr.Recognizer()
-        r.energy_threshold       = 250
+        r.energy_threshold         = 200
         r.dynamic_energy_threshold = True
-        r.pause_threshold        = 0.5
+        r.pause_threshold          = 0.25  # détecte fin de mot plus vite (0.5 → 0.25s)
 
         try:
             mic = sr.Microphone()
@@ -245,14 +245,11 @@ class ListenerWidget:
                 with mic as src:
                     audio = r.listen(src, timeout=4, phrase_time_limit=3)
 
-                # Essai français d'abord, puis anglais en fallback
                 text = ""
-                for lang in ("fr-FR", "en-US"):
-                    try:
-                        text = r.recognize_google(audio, language=lang).lower().strip()
-                        break
-                    except sr.UnknownValueError:
-                        continue
+                try:
+                    text = r.recognize_google(audio, language="fr-FR").lower().strip()
+                except sr.UnknownValueError:
+                    pass
 
                 if text:
                     self._last_text = text
