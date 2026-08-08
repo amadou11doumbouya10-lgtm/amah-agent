@@ -32,6 +32,7 @@ def speak(text: str, speed: int = 2) -> dict:
                 loop.close()
 
             _ps_proc = play_mp3_blocking(path)
+            _ps_proc.wait()   # bloque ici pendant la lecture ; stop_voice() peut terminer _ps_proc
             _ps_proc = None
             try:
                 os.unlink(path)
@@ -63,25 +64,25 @@ def speak(text: str, speed: int = 2) -> dict:
 
 
 def play_mp3_blocking(path: str) -> subprocess.Popen:
-    """Joue un fichier MP3 en mode bloquant via Windows MediaPlayer COM."""
+    """Lance la lecture MP3 via Windows MediaPlayer COM et retourne le process
+    AVANT qu'il soit termine — l'appelant doit appeler proc.wait() lui-meme.
+    Cela permet a stop_voice() de terminer le process en cours de lecture."""
     uri = "file:///" + os.path.abspath(path).replace("\\", "/")
     ps = (
         "Add-Type -AssemblyName PresentationCore; "
         "$mp = New-Object System.Windows.Media.MediaPlayer; "
         f"$mp.Open([System.Uri]::new('{uri}')); "
         "while (-not $mp.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds 50 }; "
-        "$ms = [int]$mp.NaturalDuration.TimeSpan.TotalMilliseconds + 500; "
+        "$ms = [int]$mp.NaturalDuration.TimeSpan.TotalMilliseconds + 50; "
         "$mp.Play(); "
         "Start-Sleep -Milliseconds $ms; "
         "$mp.Close()"
     )
-    proc = subprocess.Popen(
+    return subprocess.Popen(
         ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
         creationflags=subprocess.CREATE_NO_WINDOW,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    proc.wait()
-    return proc
 
 
 def stop_voice() -> dict:

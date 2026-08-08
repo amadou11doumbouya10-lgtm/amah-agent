@@ -4,7 +4,7 @@ Style : HUD futuriste / cyberpunk (hexagone central, grille, coins HUD)
 Lancement : py -3.13 voice_fullscreen.py
 Quitter   : dire "ferme" / "quitte" / "au revoir"  ou  Échap
 """
-import os, sys, json, math, random, time, threading
+import os, sys, json, math, random, time, threading, queue
 from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
@@ -22,6 +22,12 @@ from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from groq_client import GroqClient, repair_tool_use_failed
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Pré-import pour que le premier F9 n'ait pas le délai d'import froid (~0.5s)
+try:
+    import gemini_client as _gemini_mod        # noqa: F401
+except Exception:
+    _gemini_mod = None
 
 _LIVE_LOG = Path(__file__).parent / "live_debug.log"
 
@@ -87,6 +93,8 @@ _DEFAULT_TOOLS = {
 }
 
 _WORD_TO_CAT = {
+    "projet":"memoire","projets":"memoire","tache":"memoire","taches":"memoire",
+    "rappelle":"memoire","souviens":"memoire",
     "liste":"fichiers","lister":"fichiers","fichier":"fichiers","fichiers":"fichiers",
     "dossier":"fichiers","trouve":"fichiers","trouver":"fichiers","deplace":"fichiers",
     "organise":"fichiers","classe":"fichiers","lis":"fichiers","lire":"fichiers",
@@ -121,12 +129,12 @@ _WORD_TO_CAT = {
 }
 
 _CAT_TOOLS = {
-    "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info"},
+    "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
     "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf"},
     "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
-    "email":     {"read_emails","send_email","search_emails"},
+    "email":     {"read_emails","send_email","search_emails","draft_email"},
     "memoire":   {"save_memory","get_memories","delete_memory"},
-    "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info"},
+    "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},
     "utils":     {"calculate","get_datetime","add_days","generate_password","convert_units","zip_files","unzip_file","list_archive"},
     "data":      {"read_excel","create_excel","append_to_excel","read_clipboard","write_clipboard"},
     "media":     {"speak","listen","send_notification","set_reminder","screenshot_full"},
@@ -134,9 +142,11 @@ _CAT_TOOLS = {
     "info":      {"get_weather","get_weather_simple","translate","detect_language","get_stats","check_update"},
     "hardware":  {"set_volume","get_audio_level","mute_audio","set_brightness","get_brightness","wifi_toggle"},
     "vision":    {"analyze_screen","screenshot_full"},
-    "youtube":   {"open_youtube","search_youtube","open_browser","web_search"},
+    "youtube":   {"open_youtube","search_youtube","open_browser","web_search","play_music"},
     "flights":   {"search_flights","web_search","open_browser"},
     "planner":   {"create_plan","execute_plan"},
+    "planif":    {"create_daily_task","list_tasks","delete_task","run_task_now"},
+    "code":      {"write_code","run_code","explain_code"},
     "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
                    "launch_game_steam","search_game_on_steam","install_game_steam"},
     "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
@@ -210,7 +220,10 @@ _TEXT_ENTRY_TOOL = {
 }
 
 def _select_tools(message: str):
-    words = message.lower().replace("'", " ").split()
+    import unicodedata
+    nfd   = unicodedata.normalize("NFD", message.lower().replace("'", " "))
+    clean = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    words = clean.split()
     cats  = {_WORD_TO_CAT[w] for w in words if w in _WORD_TO_CAT}
     if not cats:
         needed = _DEFAULT_TOOLS
@@ -243,6 +256,64 @@ def _hex_points(cx, cy, r, angle_offset=0):
     return pts
 
 
+# ── TTS local instantané (pyttsx3, sans réseau) ──────────────────────────────
+
+class _TtsWorker:
+    """Synthèse vocale locale via pyttsx3 (SAPI5 Windows).
+    Thread dédié — aucun appel réseau, audio démarre en < 50ms."""
+
+    def __init__(self):
+        self._queue     = queue.Queue()
+        self._done      = threading.Event()
+        self._done.set()
+        self._engine    = None
+        self._available = False
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        try:
+            import pyttsx3
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 165)
+            for v in engine.getProperty('voices'):
+                if any(k in v.id.lower() for k in ('fr', 'hortense', 'julie')):
+                    engine.setProperty('voice', v.id)
+                    break
+            self._engine    = engine
+            self._available = True
+        except Exception:
+            return
+        while True:
+            text = self._queue.get()
+            if text is None:
+                break
+            if not text.strip():
+                self._done.set()
+                continue
+            try:
+                self._engine.say(text)
+                self._engine.runAndWait()
+            except Exception:
+                pass
+            self._done.set()
+
+    def say(self, text: str) -> dict:
+        """Parle le texte (bloquant). Repli sur edge-tts si pyttsx3 indisponible."""
+        if not self._available:
+            return speak(text)
+        self._done.clear()
+        self._queue.put(text)
+        self._done.wait(timeout=60)
+        return {"success": True}
+
+    def stop(self):
+        if self._engine:
+            try:
+                self._engine.stop()
+            except Exception:
+                pass
+
+
 # ── Interface ─────────────────────────────────────────────────────────────────
 
 class AmahVoiceUI:
@@ -273,6 +344,7 @@ class AmahVoiceUI:
         self._webcam_frame  = None                # derniere image PIL (thread camera)
         self._webcam_photo  = None                # PhotoImage Tk (cree dans le thread UI)
 
+        self._tts = _TtsWorker()   # TTS local instantané (pyttsx3, thread dédié)
         self._chat_lock = threading.Lock()  # serialise _chat() entre voix et texte tape
         self._text_entry_visible = False  # suivi thread-safe (winfo_ismapped n'est pas thread-safe)
 
@@ -480,7 +552,7 @@ class AmahVoiceUI:
         self._draw_corners(c, W, H, color)
 
         # ── En-tête ───────────────────────────────────────────────────────
-        c.create_text(40, 28, text="AMAH  AGENT  v1.4",
+        c.create_text(40, 28, text="AMAH  AGENT  v1.5.1",
                       fill=color, font=("Consolas", 11, "bold"), anchor="nw")
         c.create_text(40, 48, text="INTERFACE VOCALE  ·  GROQ AI",
                       fill=_blend(BG, color, 0.45),
@@ -611,12 +683,12 @@ class AmahVoiceUI:
         try:
             import speech_recognition as sr
             self._sr = sr.Recognizer()
-            self._sr.pause_threshold        = 0.7   # coupe après 0.7s de silence
-            self._sr.energy_threshold       = 300
-            self._sr.dynamic_energy_threshold = True
+            self._sr.pause_threshold          = 0.6
+            self._sr.energy_threshold         = 200
+            self._sr.dynamic_energy_threshold = False  # evite que le seuil monte trop haut sur bruit de fond
             self._mic = sr.Microphone()
             with self._mic as src:
-                self._sr.adjust_for_ambient_noise(src, duration=1.0)
+                self._sr.adjust_for_ambient_noise(src, duration=0.5)
             self._mic_ready = True
         except Exception as e:
             self._mic_ready = False
@@ -716,7 +788,7 @@ class AmahVoiceUI:
         # Fermeture vocale
         if any(w in texte.lower() for w in STOP_WORDS):
             self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
-            speak("À bientôt.")
+            self._tts.say("À bientôt.")
             time.sleep(0.3)
             self.root.after(0, self._quit)
             return
@@ -743,7 +815,7 @@ class AmahVoiceUI:
             # meme peripherique.
             self._live_mode = (action == "start")
             if reply and not is_err:
-                speak(reply[:450], speed=2)
+                self._tts.say(reply[:450])
             # Efface un eventuel message de statut Groq (rotation de cle)
             # laisse par _on_status pendant ce dernier echange.
             self.root.after(0, self._user_var.set, "")
@@ -763,7 +835,7 @@ class AmahVoiceUI:
             # speak() est bloquant : on attend la fin réelle de la voix
             # au lieu d'estimer une durée, et on affiche l'erreur si la
             # synthèse échoue plutôt que de l'avaler en silence.
-            voice_res = speak(reply[:450], speed=2)
+            voice_res = self._tts.say(reply[:450])
             if "error" in voice_res:
                 self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
                                 f"Voix indisponible : {voice_res['error'][:120]}")
@@ -802,7 +874,15 @@ class AmahVoiceUI:
                 return _call(msgs, tools)
             except Exception as e:
                 if "not in request.tools" in str(e) and tools is not TOOLS_DEFINITIONS:
-                    tools = TOOLS_DEFINITIONS
+                    # Ajoute uniquement l'outil manquant au lieu des 99
+                    repaired_name = repair_tool_use_failed(e)
+                    if repaired_name:
+                        missing_name = repaired_name[0]
+                        extra = [t for t in TOOLS_DEFINITIONS
+                                 if t["function"]["name"] == missing_name]
+                        tools = list(tools) + extra
+                    else:
+                        tools = TOOLS_DEFINITIONS
                     return _call(msgs, tools)
 
                 # Autre cas de 400 AVANT reponse : le modele a emis un appel
@@ -822,7 +902,9 @@ class AmahVoiceUI:
                 })
                 res = self._run_tool(tc, on_status=_on_status)
                 msgs.append({"role": "tool", "tool_call_id": tc.id, "content": res})
-                tools = TOOLS_DEFINITIONS
+                # Ajoute l'outil réparé à la liste courante au lieu des 99
+                extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == name]
+                tools = list(tools) + [e for e in extra if e not in tools]
                 return _call(msgs, tools)
 
         try:
@@ -847,6 +929,36 @@ class AmahVoiceUI:
                         "content": res,
                     })
                 resp = _call_safe(self.messages)
+
+            # Cas particulier : outil émis en texte brut <function>nom</function>{args}
+            import re as _re
+            _raw = resp.choices[0].message.content or ""
+            _m = _re.match(
+                r'^<function>([\w]+)</function>\s*(\{.*\})\s*$',
+                _raw.strip(), _re.DOTALL
+            )
+            if _m:
+                _tname, _targs = _m.group(1), _m.group(2)
+                try:
+                    _fake = SimpleNamespace(
+                        id="txt-repair-0",
+                        function=SimpleNamespace(name=_tname, arguments=_targs),
+                    )
+                    _res = self._run_tool(_fake, on_status=_on_status)
+                    if len(_res) > 2000:
+                        _res = _res[:2000] + "\n...[tronqué]"
+                    self.messages.append({
+                        "role": "assistant", "content": "",
+                        "tool_calls": [{"id": "txt-repair-0", "type": "function",
+                                        "function": {"name": _tname, "arguments": _targs}}],
+                    })
+                    self.messages.append({
+                        "role": "tool", "tool_call_id": "txt-repair-0",
+                        "content": _res,
+                    })
+                    resp = _call_safe(self.messages)
+                except Exception:
+                    pass
 
             reply = resp.choices[0].message.content or "Compris."
             self.messages.append({"role": "assistant", "content": reply})

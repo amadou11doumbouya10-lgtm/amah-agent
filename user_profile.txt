@@ -1,0 +1,122 @@
+# PROFIL UTILISATEUR — Amah Agent
+# Charge automatiquement au demarrage. Modifie librement ce fichier.
+# Lignes commencant par # sont des commentaires (ignorees par Amah).
+
+[IDENTITE]
+Prenom : Amadou
+Nom : Doumbouya
+Email perso : amadou11doumbouya10@gmail.com
+Email officiel Amah : contact.amah.officiel@gmail.com
+GitHub : github.com/amadou11doumbouya10-lgtm
+Portfolio : amadou11doumbouya10-lgtm.github.io/-theamah-streaming/portfolio.html
+
+[METIER ET PROJETS]
+Metier : Developpeur independant / Entrepreneur IA
+Domaine : Intelligence artificielle, assistants IA locaux, applications desktop Windows
+
+Projet principal : Amah Agent v1.5.1 — assistant IA local pour PC Windows
+Description : Agent IA avec 99 outils reels (fichiers, emails, navigation web, voix, vision, jeux...),
+cerveau Groq (Llama 3.3 70B), mode vocal temps reel Gemini Live, interface graphique tkinter,
+systeme de licences pour distribution clients.
+
+Projet secondaire : Site web vitrine pour Amah entreprise (creation HTML/CSS/JS en cours)
+
+[OUTILS ET TECHNOLOGIES]
+Langages : Python 3.13, HTML, CSS, JavaScript
+Frameworks / libs : tkinter, Playwright, edge-tts, SpeechRecognition, SQLite, openpyxl, Pillow
+APIs utilisees : Groq API (Llama), Gemini API (Google), Kimi API (Moonshot), LiteLLM proxy local
+Environnement : Windows 11 Home, VS Code, PowerShell
+Dossier de travail principal : C:/Users/Smarte technologui/Desktop/Projets/amah-agent
+
+[ARCHITECTURE AMAH]
+Fichiers cles : gui.py (interface), groq_client.py (IA), config.py (outils), voice_fullscreen.py (voix)
+Base de donnees : amah_memory.db (SQLite — historique + memoires + stats)
+Distribution clients : dossier dist/ — Amah Agent.exe (standalone 125Mo)
+LiteLLM proxy local : http://localhost:4000/v1 — usage dev uniquement, invisible pour les clients
+Chaine de fallback IA : Groq (3 cles) → Gemini 2.0 Flash → Kimi moonshot-v1-32k
+
+[PREFERENCES DE TRAVAIL]
+Langue : francais (toujours, meme pour le code)
+Style de reponse : direct et efficace, sans detour
+Horaires : variables (projet personnel + commercial)
+Mode de communication : oral (mode vocal) + texte (gui.py)
+
+[CONTACTS ET COMPTES]
+Gmail perso (boite perso, accessible via navigateur Amah) : amadou11doumbouya10@gmail.com
+Gmail Amah (email officiel, IMAP read_emails/send_email) : contact.amah.officiel@gmail.com
+GitHub : amadou11doumbouya10-lgtm
+
+[AUTRES PROJETS EN COURS]
+
+--- Dossier : Desktop/Projets/ ---
+
+Projet : Theamah project
+Type : Site web streaming / portfolio (HTML, JS)
+Chemin : C:/Users/Smarte technologui/Desktop/Projets/Theamah project
+Description : Site de streaming avec bibliotheque de films et series, portfolio, PWA (manifest + sw.js)
+
+Projet : it-solutions (Vision Amah)
+Type : Site vitrine entreprise — Next.js 14, TypeScript, Tailwind CSS, Framer Motion
+Chemin : C:/Users/Smarte technologui/Desktop/it-solutions
+Description : Site marketing pour Vision Amah, societe de solutions informatiques et IA a Conakry, Guinee.
+Stack : Next.js 14 App Router, TypeScript, Tailwind CSS, Framer Motion, Vercel
+Fichier principal : src/app/page.tsx (one-page), composants dans src/components/
+
+Projet : agent-visa-france
+Chemin : C:/Users/Smarte technologui/Desktop/Projets/agent-visa-france
+Description : Agent IA pour accompagnement visa France
+
+Projet : freellmapi
+Type : API LLM gratuite (client desktop + Docker)
+Chemin : C:/Users/Smarte technologui/Desktop/Projets/freellmapi
+Description : Projet d'API LLM libre avec client desktop et conteneur Docker
+
+Projet : ThinkSmartView
+Type : Outil de flash Android (ADB, ROMs LineageOS, QPST)
+Chemin : C:/Users/Smarte technologui/Desktop/Projets/ThinkSmartView
+Description : Outil pour flasher des ROM Android sur appareils mobiles
+
+Projet : projet de creation d'un site web pour Amah entreprise
+Chemin : C:/Users/Smarte technologui/Desktop/Projets/projet de creation d un site web pour Amah entreprise
+Description : Site web vitrine pour Amah entreprise (HTML/CSS/JS, en cours de developpement avec Amah Agent)
+
+--- Dossier : Desktop/Automatisation/ ---
+
+Projet : generateur-cours
+Type : Generateur de cours par IA (Python)
+Chemin : C:/Users/Smarte technologui/Desktop/Automatisation/generateur-cours
+Fichiers cles : generateur.py, chercheur.py, main.py
+Description : Script Python qui genere des cours automatiquement via IA
+
+--- Dossier : Desktop/pour trouve des clien/ ---
+
+Projet : Prospection clients
+Type : Script de prospection automatisee (Python)
+Chemin : C:/Users/Smarte technologui/Desktop/pour trouve des clien
+Fichier principal : prospect_finder.py
+Description : Outil Python pour trouver des clients potentiels automatiquement
+
+--- Dossier : Desktop/prospect clien maps/ ---
+
+Projet : Prospects Google Maps
+Chemin : C:/Users/Smarte technologui/Desktop/prospect clien maps
+Fichiers : prospects.csv, prospects.html
+Description : Base de donnees de prospects extraits de Google Maps (format CSV + HTML)
+
+--- Dossier : Desktop/projet ministeriel/ ---
+
+Projet : Diagnostic volaille (demo)
+Chemin : C:/Users/Smarte technologui/Desktop/projet ministeriel
+Fichier principal : diagnostic_volaille_demo.py
+Description : Application de diagnostic pour la volaille — projet a caractere institutionnel/ministeriel
+
+[CONTEXTE COMMERCIAL]
+Amah est un produit commercial : licence offline HMAC-SHA256 liee au Machine UUID de chaque client.
+Amadou genere les licences manuellement depuis developpeur/generate_license.bat.
+Les clients recoivent le dossier dist/ (exe + .env + guide) et doivent fournir leur UUID pour obtenir leur cle.
+
+[AUTRES INFORMATIONS UTILES]
+Ami proche : Latore (teste parfois Amah avec Amadou)
+Preference : ne pas mentionner le nom du createur sauf si demande explicitement
+Objectif court terme : rendre Amah plus autonome sur les projets web multi-fichiers
+Objectif long terme : distribuer Amah comme produit SaaS avec serveur central de licences et gestion clients

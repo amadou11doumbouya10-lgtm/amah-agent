@@ -1076,6 +1076,10 @@ class AmahGUI:
     # Mots clés → catégorie d'outils (élargi pour couvrir un maximum de cas)
     _WORD_TO_CAT = {
         # fichiers
+        # projets / tâches → mémoire (get_memories) d'abord, puis fichiers si nécessaire
+        "projet":"memoire","projets":"memoire","tache":"memoire","taches":"memoire",
+        "rappelle":"memoire","souviens":"memoire","sais":"memoire",
+        # fichiers
         "liste":"fichiers","lister":"fichiers","fichier":"fichiers","fichiers":"fichiers",
         "dossier":"fichiers","dossiers":"fichiers","trouve":"fichiers","trouver":"fichiers",
         "deplace":"fichiers","organise":"fichiers","organiser":"fichiers","classe":"fichiers",
@@ -1331,8 +1335,14 @@ class AmahGUI:
             # peut donc jamais s'en charger. On relance avec tous les outils
             # plutot que de remonter cette erreur a l'utilisateur.
             if "not in request.tools" in str(e):
-                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
-                                           model_override=MODEL)
+                from groq_client import repair_tool_use_failed as _rtuf
+                _rep = _rtuf(e)
+                if _rep:
+                    _extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == _rep[0]]
+                    tools = list(tools or []) + _extra
+                else:
+                    tools = TOOLS_DEFINITIONS
+                response = self._groq_call(self.messages, tools=tools, model_override=MODEL)
             else:
                 # Autre cas de 400 AVANT reponse : le modele a emis un appel
                 # d'outil malforme en texte brut (tool_use_failed). On tente
@@ -1347,8 +1357,10 @@ class AmahGUI:
             tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
             available  = {t["function"]["name"] for t in (tools or [])}
             if not tool_names.issubset(available):
-                response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
-                                           model_override=MODEL)
+                _missing = tool_names - available
+                _extra   = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in _missing]
+                tools    = list(tools or []) + _extra
+                response = self._groq_call(self.messages, tools=tools, model_override=MODEL)
 
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
@@ -1388,7 +1400,17 @@ class AmahGUI:
                                            model_override=MODEL)  # toujours 70B pour tool use
             except Exception as e:
                 if "not in request.tools" in str(e):
-                    response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                    # Ajoute uniquement l'outil manquant au lieu d'envoyer les 99
+                    from groq_client import repair_tool_use_failed
+                    repaired = repair_tool_use_failed(e)
+                    if repaired:
+                        missing_name = repaired[0]
+                        extra = [t for t in TOOLS_DEFINITIONS
+                                 if t["function"]["name"] == missing_name]
+                        tools = list(tools or []) + extra
+                    else:
+                        tools = TOOLS_DEFINITIONS
+                    response = self._groq_call(self.messages, tools=tools,
                                                model_override=MODEL)
                 else:
                     raise
@@ -1396,10 +1418,51 @@ class AmahGUI:
                 tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
                 available  = {t["function"]["name"] for t in (tools or [])}
                 if not tool_names.issubset(available):
-                    response = self._groq_call(self.messages, tools=TOOLS_DEFINITIONS,
+                    # Ajoute uniquement les outils manquants au lieu des 99
+                    missing = tool_names - available
+                    extra   = [t for t in TOOLS_DEFINITIONS
+                               if t["function"]["name"] in missing]
+                    tools   = list(tools or []) + extra
+                    response = self._groq_call(self.messages, tools=tools,
                                                model_override=MODEL)
 
-        return response.choices[0].message.content
+        # Cas particulier : modèle a émis l'appel d'outil en texte brut
+        # format <function>nom</function>{"arg":...} au lieu de finish_reason="tool_calls"
+        import re as _re
+        _content = response.choices[0].message.content or ""
+        _m = _re.match(
+            r'^<function>([\w]+)</function>\s*(\{.*\})\s*$',
+            _content.strip(), _re.DOTALL
+        )
+        if _m:
+            _tname, _targs = _m.group(1), _m.group(2)
+            try:
+                _fake = SimpleNamespace(
+                    id="txt-repair-0",
+                    function=SimpleNamespace(name=_tname, arguments=_targs),
+                )
+                _res = self._execute_tool(_fake)
+                if len(_res) > 2000:
+                    _res = _res[:2000] + "\n...[tronqué]"
+                self.messages.append({
+                    "role": "assistant", "content": "",
+                    "tool_calls": [{"id": "txt-repair-0", "type": "function",
+                                    "function": {"name": _tname, "arguments": _targs}}],
+                })
+                self.messages.append({
+                    "role": "tool", "tool_call_id": "txt-repair-0",
+                    "content": _res,
+                })
+                self._trim_messages()
+                _ext = list(tools or [])
+                _have = {t["function"]["name"] for t in _ext}
+                if _tname not in _have:
+                    _ext += [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == _tname]
+                response = self._groq_call(self.messages, tools=_ext, model_override=MODEL)
+            except Exception:
+                pass
+
+        return response.choices[0].message.content or ""
 
 
 # ── Écran de configuration (premier lancement) ──────────────────────────────
@@ -1482,7 +1545,7 @@ class SetupWindow:
         tk.Frame(body, bg=GOLD_DIM, height=1).pack(fill=tk.X, pady=(4, 10))
 
         self._lbl(body, "Adresse Gmail", "optionnel · pour lire et envoyer des emails")
-        self.v_gmail = tk.StringVar(value="contact.amah.officiel@gmail.com")
+        self.v_gmail = tk.StringVar(value="")
         tk.Entry(body, textvariable=self.v_gmail, **self._es()).pack(fill=tk.X, pady=(0, 10))
 
         self._lbl(body, "Mot de passe application Gmail",
@@ -1638,7 +1701,7 @@ def _setup_crash_reporter():
     def _handler(exc_type, exc_value, exc_tb):
         try:
             tb   = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            body = f"CRASH AMAH AGENT\n\n{tb}\n\nVersion: 1.0.0\nDate: {datetime.now()}"
+            body = f"CRASH AMAH AGENT\n\n{tb}\n\nVersion: 1.5.1\nDate: {datetime.now()}"
             from tools.email_tool import send_email
             send_email("contact.amah.officiel@gmail.com", "Amah Agent — Crash rapport", body)
         except Exception:

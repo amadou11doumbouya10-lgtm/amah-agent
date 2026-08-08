@@ -171,6 +171,8 @@ class GroqClient:
                             os.getenv("GROQ_API_KEY_2"),
                             os.getenv("GROQ_API_KEY_3"),
                         ] if k and not k.startswith("AJOUTER")]
+                        if not self._keys:
+                            raise RuntimeError("LiteLLM non disponible et aucune cle Groq dans .env")
                         self._index  = 0
                         self._client = Groq(api_key=self._keys[0])
                         self._client_lock = threading.Lock()

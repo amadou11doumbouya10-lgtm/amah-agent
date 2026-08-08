@@ -16,6 +16,17 @@ SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8").format(
     desktop=_DESKTOP, documents=_DOCUMENTS, downloads=_DOWNLOADS,
 )
 
+# Profil utilisateur personnalise (user_profile.txt) -- charge si present.
+# Les lignes commentees (#) et les lignes vides sont ignorees.
+_PROFILE_PATH = Path(__file__).resolve().parent / "user_profile.txt"
+if _PROFILE_PATH.exists():
+    _lines = [
+        l.strip() for l in _PROFILE_PATH.read_text(encoding="utf-8").splitlines()
+        if l.strip() and not l.strip().startswith("#")
+    ]
+    if _lines:
+        SYSTEM_PROMPT += "\n\nPROFIL UTILISATEUR :\n" + "\n".join(_lines)
+
 # ── Définitions compactes des outils (tokens optimisés) ─────────────────────
 def _f(name, desc, props=None, required=None):
     params = {"type": "object", "properties": props or {}, "required": required or []}

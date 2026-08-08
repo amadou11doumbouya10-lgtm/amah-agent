@@ -220,9 +220,9 @@ class ListenerWidget:
             return
 
         r   = sr.Recognizer()
-        r.energy_threshold         = 200
-        r.dynamic_energy_threshold = True
-        r.pause_threshold          = 0.25  # détecte fin de mot plus vite (0.5 → 0.25s)
+        r.energy_threshold         = 150
+        r.dynamic_energy_threshold = False  # seuil fixe — evite que le bruit ambiant monte le seuil trop haut
+        r.pause_threshold          = 0.25
 
         try:
             mic = sr.Microphone()
@@ -232,7 +232,7 @@ class ListenerWidget:
 
         self._set("CALIB", CYAN_DIM)
         with mic as src:
-            r.adjust_for_ambient_noise(src, duration=1.2)
+            r.adjust_for_ambient_noise(src, duration=0.5)
 
         self._set("ECOUTE", CYAN_DIM)
 
@@ -262,7 +262,13 @@ class ListenerWidget:
 
             except sr.WaitTimeoutError:
                 pass
-            except Exception:
+            except sr.RequestError as e:
+                self._last_text = f"réseau: {str(e)[:20]}"
+                self._set("ERREUR", RED)
+                time.sleep(2)
+                self._set("ECOUTE", CYAN_DIM)
+            except Exception as e:
+                self._last_text = str(e)[:20]
                 time.sleep(0.5)
 
     @staticmethod
