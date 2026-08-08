@@ -25,26 +25,32 @@ def _get_secret() -> bytes:
     return secret.encode()
 
 
+def _run_ps(cmd: str, timeout: int = 10) -> str:
+    r = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", cmd],
+        capture_output=True, text=True, timeout=timeout,
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
+    return r.stdout.strip()
+
+
 def get_machine_id() -> str:
-    """Récupère l'UUID unique de la machine Windows."""
+    """Récupère l'UUID unique de la machine Windows.
+    Get-CimInstance (WinRM) répond plus vite et plus fiablement que
+    Get-WmiObject (DCOM legacy) sous charge système ; un retry absorbe
+    les échecs ponctuels au lieu de tomber en fail-closed sur "UNKNOWN"
+    à la moindre lenteur passagère."""
+    for _ in range(2):
+        try:
+            uid = _run_ps("(Get-CimInstance Win32_ComputerSystemProduct).UUID")
+            if uid and len(uid) > 10:
+                return uid
+        except Exception:
+            pass
     try:
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-WmiObject Win32_ComputerSystemProduct).UUID"],
-            capture_output=True, text=True, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        uid = r.stdout.strip()
-        if uid and len(uid) > 10:
-            return uid
         # Fallback : numéro de série du BIOS
-        r2 = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-WmiObject Win32_BIOS).SerialNumber"],
-            capture_output=True, text=True, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return r2.stdout.strip() or "UNKNOWN"
+        sn = _run_ps("(Get-CimInstance Win32_BIOS).SerialNumber")
+        return sn or "UNKNOWN"
     except Exception:
         return "UNKNOWN"
 
