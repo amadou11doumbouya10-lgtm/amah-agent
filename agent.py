@@ -23,14 +23,16 @@ from config import (
 from groq_client import GroqClient, repair_tool_use_failed
 from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.guard import set_confirm_handler
-from tools.router_v04 import route_tools, is_simple_chat, normalize_for_router
+from tools.router_v04 import normalize_for_router
+from tools.router_v03 import detect_intents
+from tools.tool_router import select_tools
 from tools.fastpath_v01 import detect_fastpath
 from tools.context_v01 import ConversationContext
 from tools.planner_v04 import PlannerPlan, PlannerStep, build_plan
 from tools.planner_v06 import build_deep_research_plan
 from tools.executor_v03 import execute_verified_step_with_recovery, format_verification_line
 from tools.security_v02 import authorize_tool, format_security_line
-from tools.capability_bridge_v01 import build_capability_plan, merge_tools
+from tools.capability_bridge_v01 import build_capability_plan
 from tools.voice_pipeline_v01 import (
     is_voice_listen_request,
     parse_listen_result,
@@ -39,13 +41,13 @@ from tools.voice_pipeline_v01 import (
     voice_local_clarification,
 )
 from tools.memory import save_message, load_recent_messages
-from tools.memory_recall_v024 import (
-    recall,
-    format_recall,
-    wants_exact_sources,
-    find_best_memory,
-    find_sources,
+from tools.memory_recall_v024 import format_recall
+from tools.memory_context import (
+    memory_context,
+    memory_instruction,
+    normalize_for_matching as _normalize_for_matching,
 )
+from tools.instant import datetime_request_kind
 
 
 
@@ -100,8 +102,7 @@ class _GroqClientAdapter:
 
 MAX_MESSAGES = 60
 
-USE_ROUTER_V04 = os.getenv("AMAH_ROUTER_V04", "1") == "1"
-ROUTER_MAX_TOOLS = 6
+ROUTER_MAX_TOOLS = 12
 
 USE_MEMORY_V024 = os.getenv("AMAH_MEMORY_V024", "0") == "1"
 MEMORY_STARTUP_HISTORY = 10
@@ -124,26 +125,6 @@ DIRECT_RESPONSE_TOOLS = {
     "convert_units",
     "screenshot_full",
     "take_screenshot",
-    "web_search",
-}
-
-# Fallback limité pour protéger le budget TPM de Groq.
-# On garde uniquement des outils généraux, non destructifs.
-SAFE_FALLBACK_TOOL_NAMES = {
-    "web_search",
-    "read_webpage",
-    "open_browser",
-    "find_files",
-    "read_file",
-    "list_files",
-    "open_file",
-    "calculate",
-    "get_datetime",
-    "get_weather",
-    "get_weather_simple",
-    "get_system_info",
-    "screenshot_full",
-    "take_screenshot",
 }
 
 
@@ -151,158 +132,7 @@ SAFE_FALLBACK_TOOL_NAMES = {
 # DÉTECTION MÉMOIRE
 # ============================================================================
 
-MEMORY_QUERY_PATTERNS = [
-    r"\bqu est ce qu on avait dit\b",
-    r"\bqu est ce qu on avait decide\b",
-    r"\bce qu on avait dit\b",
-    r"\bce qu on avait decide\b",
-    r"\btu te souviens\b",
-    r"\bte souviens tu\b",
-    r"\bnotre conversation\b",
-    r"\bhistorique\b",
-    r"\bla derniere fois\b",
-    r"\bqu on a fait\b",
-    r"\bqu on a decide\b",
-    r"\brappelle moi\b.*\b(projet|conversation|decide|dit|memoire|historique)\b",
-]
-
-
-def _normalize_for_matching(text: str) -> str:
-    text = str(text or "").lower().strip()
-
-    replacements = {
-        "é": "e",
-        "è": "e",
-        "ê": "e",
-        "ë": "e",
-        "à": "a",
-        "â": "a",
-        "ä": "a",
-        "î": "i",
-        "ï": "i",
-        "ô": "o",
-        "ö": "o",
-        "ù": "u",
-        "û": "u",
-        "ü": "u",
-        "ç": "c",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    text = text.replace("'", " ")
-    text = text.replace("’", " ")
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-def _is_memory_query(user_text: str) -> bool:
-    text = _normalize_for_matching(user_text)
-
-    if not text:
-        return False
-
-    if wants_exact_sources(user_text):
-        return True
-
-    return any(
-        re.search(pattern, text)
-        for pattern in MEMORY_QUERY_PATTERNS
-    )
-
-
-def _has_non_memory_intent(user_text: str) -> bool:
-    try:
-        _, intents = route_tools(
-            user_text,
-            TOOLS_DEFINITIONS,
-            max_tools=ROUTER_MAX_TOOLS,
-        )
-    except Exception:
-        return False
-
-    ignored = {
-        "memory_read",
-        "memory_save",
-        "fallback_all_tools",
-        "safe_fallback",
-    }
-
-    return any(
-        intent not in ignored
-        for intent in intents
-    )
-
-
-def _extract_memory_query(user_text: str) -> str:
-    text = str(user_text or "").strip()
-
-    if not text:
-        return text
-
-    patterns = [
-        r"\s+ puis \s+(?=donne|dis|dit|indique|montre|ouvre|lance|cherche|fais|calcule|affiche|va|envoie|execute|exécute)\b",
-        r"\s+ ensuite \s+(?=donne|dis|dit|indique|montre|ouvre|lance|cherche|fais|calcule|affiche|va|envoie|execute|exécute)\b",
-        r"\s+ et \s+(?=donne|dis|dit|indique|montre|ouvre|lance|cherche|fais|calcule|affiche|va|envoie|execute|exécute)\b",
-        r"\s+ après \s+(?=donne|dis|dit|indique|montre|ouvre|lance|cherche|fais|calcule|affiche|va|envoie|execute|exécute)\b",
-    ]
-
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-            prefix = text[
-                :match.start()
-            ].strip(" ,;:.")
-
-            if prefix:
-                return prefix
-
-    return text
-
-
-def _extract_memory_subject(user_text: str) -> str:
-    memory_query = _extract_memory_query(
-        user_text
-    )
-
-    normalized = _normalize_for_matching(
-        memory_query
-    )
-
-    if not normalized:
-        return ""
-
-    patterns = [
-        r"\bsur\s+(.+)$",
-        r"\bpour\s+(.+)$",
-        r"\bconcernant\s+(.+)$",
-        r"\ba propos de\s+(.+)$",
-    ]
-
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            normalized,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-            subject = match.group(1).strip(
-                " .,:;!?\n\r"
-            )
-
-            if subject:
-                return subject
-
-    return ""
+# Détection et rappel mémoire : tools/memory_context.py (partagé avec gui.py).
 
 
 # ============================================================================
@@ -488,337 +318,30 @@ def _summarize_with_client(
     )
 
 
-def _cached_memory_for_mixed_query(
-    user_text: str,
-) -> Optional[dict]:
-    """
-    Cherche une mémoire existante sans lancer de LLM.
-    On essaie d'abord le sujet extrait de la partie mémoire.
-    """
-
-    candidates = []
-
-    subject = _extract_memory_subject(
-        user_text
-    )
-
-    if subject:
-        candidates.append(subject)
-
-    memory_query = _extract_memory_query(
-        user_text
-    )
-
-    if memory_query:
-        candidates.append(memory_query)
-
-    candidates.append(user_text)
-
-    seen = set()
-
-    for candidate in candidates:
-        key = _normalize_for_matching(
-            candidate
-        )
-
-        if not key or key in seen:
-            continue
-
-        seen.add(key)
-
-        try:
-            cached = find_best_memory(
-                candidate
-            )
-        except Exception:
-            cached = None
-
-        if not cached:
-            continue
-
-        return {
-            **cached,
-            "mode": "summary_cached",
-            "query": user_text,
-            "cached": True,
-            "sources": [],
-            "memory_saved": False,
-            "used_llm": False,
-        }
-
-    return None
-
-
-def _sources_memory_for_mixed_query(
-    memory_query: str,
-) -> Optional[dict]:
-    """
-    Fallback sans LLM : si aucune mémoire structurée n'existe encore,
-    on récupère les sources historiques et on les donnera au LLM final.
-    Cela évite un deuxième appel LLM dédié à la mémoire.
-    """
-
-    if not memory_query:
-        return None
-
-    try:
-        sources = find_sources(
-            memory_query,
-            limit=6,
-        )
-    except Exception:
-        return None
-
-    if not sources:
-        return None
-
-    return {
-        "mode": "history_sources",
-        "query": memory_query,
-        "cached": False,
-        "sources": sources,
-        "memory_saved": False,
-        "used_llm": False,
-    }
-
-
 def _memory_context(
     client,
     user_text: str,
 ) -> Tuple[Optional[dict], bool]:
-    """
-    Retourne :
-        (résultat mémoire, réponse_directe)
-    """
-
+    """Retourne (résultat mémoire, réponse_directe) — voir tools/memory_context.py."""
     if not USE_MEMORY_V024:
         return None, False
-
-    if not _is_memory_query(user_text):
-        return None, False
-
-    started = perf_counter()
-    mixed = _has_non_memory_intent(
-        user_text
+    return memory_context(
+        user_text,
+        summarize_fn=lambda prompt: _summarize_with_client(client, prompt),
+        log=(lambda message: console.print(f"[dim #7a5f38]{message}[/dim #7a5f38]")) if PERF_LOG else None,
     )
-
-    # ========================================================================
-    # DEMANDE MIXTE : mémoire + action
-    # ========================================================================
-
-    if mixed:
-        memory_query = _extract_memory_query(
-            user_text
-        )
-
-        cached = _cached_memory_for_mixed_query(
-            user_text
-        )
-
-        if cached:
-            elapsed_ms = (
-                perf_counter() - started
-            ) * 1000
-
-            if PERF_LOG:
-                console.print(
-                    "[dim #7a5f38]"
-                    "[MEMORY] mode=summary_cached "
-                    "| cache=True "
-                    "| llm=False "
-                    "| mixed=True "
-                    f"| {elapsed_ms:.1f} ms"
-                    "[/dim #7a5f38]"
-                )
-
-            return cached, False
-
-        # Aucun cache : pas de LLM mémoire supplémentaire.
-        # On récupère seulement les sources historiques localement.
-        history_sources = _sources_memory_for_mixed_query(
-            memory_query
-        )
-
-        elapsed_ms = (
-            perf_counter() - started
-        ) * 1000
-
-        if history_sources:
-            history_sources["mixed"] = True
-
-            if PERF_LOG:
-                console.print(
-                    "[dim #7a5f38]"
-                    "[MEMORY] mode=history_sources "
-                    "| cache=False "
-                    "| llm=False "
-                    "| mixed=True "
-                    f"| {elapsed_ms:.1f} ms"
-                    "[/dim #7a5f38]"
-                )
-
-            return history_sources, False
-
-        if PERF_LOG:
-            console.print(
-                "[dim #7a5f38]"
-                "[MEMORY] mixed=True "
-                "| cache=False "
-                "| llm=False "
-                "| history_not_found "
-                f"| {elapsed_ms:.1f} ms"
-                "[/dim #7a5f38]"
-            )
-
-        return None, False
-
-    # ========================================================================
-    # DEMANDE MÉMOIRE SIMPLE
-    # ========================================================================
-
-    result = recall(
-        query=user_text,
-        summarize_fn=lambda prompt: (
-            _summarize_with_client(
-                client,
-                prompt,
-            )
-        ),
-        limit=6,
-    )
-
-    elapsed_ms = (
-        perf_counter() - started
-    ) * 1000
-
-    mode = result.get(
-        "mode",
-        "unknown",
-    )
-
-    cached = result.get(
-        "cached",
-        False,
-    )
-
-    used_llm = result.get(
-        "used_llm",
-        False,
-    )
-
-    if PERF_LOG:
-        console.print(
-            "[dim #7a5f38]"
-            f"[MEMORY] mode={mode} "
-            f"| cache={cached} "
-            f"| llm={used_llm} "
-            f"| {elapsed_ms:.1f} ms"
-            "[/dim #7a5f38]"
-        )
-
-    if mode in {
-        "exact",
-        "summary",
-        "summary_cached",
-        "summary_updated",
-    }:
-        return result, True
-
-    return result, False
-
-
-def _format_history_sources(
-    result: dict,
-) -> str:
-    sources = result.get(
-        "sources",
-        [],
-    )
-
-    if not sources:
-        return ""
-
-    blocks = []
-
-    for source in sources:
-        content = str(
-            source.get(
-                "content",
-                "",
-            )
-            or ""
-        ).strip()
-
-        if not content:
-            continue
-
-        source_id = source.get(
-            "id"
-        )
-
-        role = source.get(
-            "role",
-            "unknown",
-        )
-
-        blocks.append(
-            f"[Source #{source_id} | {role}]\n{content}"
-        )
-
-    return "\n\n".join(blocks)
 
 
 def _inject_memory_into_system(
     messages: list,
     result: dict,
 ) -> Optional[str]:
-    """
-    Injecte temporairement un résumé mémoire ou les sources historiques
-    dans le system prompt.
-    """
-
-    if not result:
+    """Injecte temporairement la mémoire dans le system prompt ; renvoie l'original."""
+    instruction = memory_instruction(result)
+    if not instruction:
         return None
-
-    mode = result.get(
-        "mode",
-        "",
-    )
-
-    if mode == "history_sources":
-        formatted = _format_history_sources(
-            result
-        )
-    else:
-        formatted = format_recall(
-            result
-        )
-
-    if not formatted:
-        return None
-
-    original = str(
-        messages[0].get(
-            "content",
-            "",
-        )
-        or ""
-    )
-
-    memory_instruction = (
-        "\n\n"
-        "[MEMOIRE PERTINENTE — Memory Recall V0.2.4]\n"
-        "Les éléments ci-dessous proviennent de l'historique. "
-        "Utilise-les uniquement comme contexte historique. "
-        "Ne prétends pas qu'ils proviennent de la conversation courante.\n\n"
-        + formatted
-    )
-
-    messages[0]["content"] = (
-        original
-        + memory_instruction
-    )
-
+    original = str(messages[0].get("content", "") or "")
+    messages[0]["content"] = original + instruction
     return original
 
 
@@ -827,65 +350,7 @@ def _inject_memory_into_system(
 # ============================================================================
 
 
-def _datetime_request_kind(user_text: str) -> Optional[str]:
-    """
-    Détecte localement une demande évidente de date/heure.
-
-    Retourne :
-        - "time" pour une demande d'heure ;
-        - "date" pour une demande de date/jour ;
-        - "datetime" pour les deux ;
-        - None si la demande n'est pas suffisamment claire.
-
-    Cette détection accepte quelques fautes fréquentes :
-    "heur", "heurs", "fais quelle heur", "kel heur", etc.
-    """
-    text = _normalize_router_text(user_text)
-
-    if not text:
-        return None
-
-    time_patterns = [
-        r"\bquel(?:le)? heure\b",
-        r"\bquel heure\b",
-        r"\bheures?\b",
-        r"\bheure actuelle\b",
-        r"\bil fait quelle heure\b",
-        r"\bca fait quelle heure\b",
-        r"\bça fait quelle heure\b",
-        r"\bheure est il\b",
-        r"\bheure est il maintenant\b",
-    ]
-
-    date_patterns = [
-        r"\bquel(?:le)? date\b",
-        r"\bquel jour\b",
-        r"\bdate d aujourd hui\b",
-        r"\bdate aujourd hui\b",
-        r"\bdate actuelle\b",
-        r"\bquel(?:le)? est la date\b",
-    ]
-
-    asks_time = any(
-        re.search(pattern, text)
-        for pattern in time_patterns
-    )
-
-    asks_date = any(
-        re.search(pattern, text)
-        for pattern in date_patterns
-    )
-
-    if asks_time and asks_date:
-        return "datetime"
-
-    if asks_time:
-        return "time"
-
-    if asks_date:
-        return "date"
-
-    return None
+_datetime_request_kind = datetime_request_kind  # tools/instant.py (partagé avec gui.py)
 
 
 def _execute_tool_by_name(
@@ -959,56 +424,51 @@ def _terminal_confirm(name: str, args: dict, description: str) -> bool:
 set_confirm_handler(_terminal_confirm)
 
 
+# Premiers mots qui désignent clairement une commande shell.
+_KNOWN_COMMANDS = {
+    "ipconfig", "ping", "dir", "ls", "systeminfo", "tasklist", "hostname", "whoami",
+    "netstat", "nslookup", "tracert", "ver", "echo", "winget", "pip", "python", "py",
+    "node", "npm", "git", "getmac", "powercfg", "where", "type", "cat", "arp", "route",
+}
+
+
 def _extract_system_command_request(user_text: str) -> Optional[str]:
     """Reconnaît explicitement une demande de commande système.
 
     Retourne la commande si elle est précisée, une chaîne vide si la demande
     est claire mais incomplète, sinon None.
+
+    "lance Steam", "lance la musique de Stromae" ou "exécute le script x.py"
+    ne sont pas des commandes : avant, tout message commençant par "lance" ou
+    "exécute" partait en run_command. Seuls passent ici "exécute la commande …"
+    et "lance/exécute <commande>" quand le premier mot est une vraie commande
+    (ipconfig, Get-Process…).
     """
     text = str(user_text or "").strip()
     if not text:
         return None
-    normalized = _strip_accents(text).lower().strip()
+    normalized = _strip_accents(text).lower().strip(" .!?")
 
-    prefixes = [
-        "execute une commande systeme",
-        "execute une commande system",
-        "execute la commande systeme",
-        "execute la commande system",
-        "lance une commande systeme",
-        "lance la commande systeme",
-        "lance une commande system",
-        "lance la commande system",
-        "execute ",
-        "exécute ",
-        "lance ",
-    ]
-    # Explicit generic request: clarification, no LLM.
-    if normalized in {
-        "execute une commande systeme",
-        "execute une commande system",
-        "execute la commande systeme",
-        "execute la commande system",
-        "lance une commande systeme",
-        "lance une commande system",
-    }:
+    if re.fullmatch(
+        r"(?:execute|lance)\s+(?:une|la)\s+commande(?:\s+(?:systeme|system|powershell))?",
+        normalized,
+    ):
         return ""
 
     explicit = re.match(
-        r"^(?:execute|exécute|lance)\s+(?:la\s+)?(?:commande\s+)?(?:systeme|système)?\s*(?::|=)?\s*(.+)$",
+        r"^(?:execute|exécute|lance)\s+(?:la\s+|cette\s+)?commande"
+        r"(?:\s+(?:systeme|système|system|powershell))?\s*[:=]?\s*(.+)$",
         text,
         flags=re.IGNORECASE,
     )
     if explicit:
-        command = explicit.group(1).strip()
-        if command:
-            return command
+        return explicit.group(1).strip()
 
-    # Common phrasing: 'exécute ipconfig' / 'lance ipconfig'.
-    m = re.match(r"^(?:execute|exécute|lance)\s+(.+)$", text, flags=re.IGNORECASE)
-    if m and not re.match(r"^(?:une|la)\s+commande\b", m.group(1).strip(), flags=re.IGNORECASE):
+    m = re.match(r"^(?:execute|exécute|lance)\s*:?\s+(.+)$", text, flags=re.IGNORECASE)
+    if m:
         command = m.group(1).strip()
-        if command.lower() not in {"une commande système", "une commande systeme", "une commande system"}:
+        first = command.split()[0].lower()
+        if first in _KNOWN_COMMANDS or re.fullmatch(r"[a-z]+-[a-z]+", first):
             return command
     return None
 
@@ -1021,12 +481,6 @@ def _extract_system_command_request(user_text: str) -> Optional[str]:
 def _normalize_router_text(user_text: str) -> str:
     """Normalise la demande pour Router V0.4, avec correction tolérante aux fautes."""
     return normalize_for_router(user_text)
-
-
-def _safe_fallback_tools(tools_definitions: list, max_tools: int = 0) -> list:
-    """Fallback volontairement vide : aucune requête inconnue ne reçoit un lot d'outils."""
-    return []
-
 
 
 def _run_capability_bridge_workflow(user_text: str) -> Optional[str]:
@@ -1087,114 +541,54 @@ def _run_capability_bridge_workflow(user_text: str) -> Optional[str]:
     return None
 
 
+def _has_actionable_request(user_text: str) -> bool:
+    """Vrai si le routeur reconnaît une action précise (météo, fichier, email…).
+
+    "je veux connaître la météo à Paris" est une demande, pas une simple
+    déclaration d'objectif : les gardes de contexte ne doivent pas l'intercepter.
+    """
+    _, info = select_tools(user_text, TOOLS_DEFINITIONS)
+    return info["niveau"] not in ("defaut", "conversation")
+
+
+def _is_local_context_update(context: ConversationContext, user_text: str) -> bool:
+    """Mise à jour de contraintes ("mon budget…", "sans eSIM") à noter sans LLM."""
+    if not context.is_pure_context_update(user_text) or _has_actionable_request(user_text):
+        return False
+    # "et pour Marseille ?" est une question de suivi, pas une contrainte : on ne
+    # l'intercepte que dans une conversation sur des modèles précis.
+    if re.match(r"^et\b", _normalize_for_matching(user_text)):
+        return context.has_explicit_model()
+    return True
+
+
 def _select_tools_for_request(
     messages: list,
     planner_plan: Optional[PlannerPlan] = None,
 ) -> Tuple[list, list]:
-    if not USE_ROUTER_V04:
-        return (
-            TOOLS_DEFINITIONS,
-            ["router_disabled"],
-        )
+    """Outils à proposer au modèle, via le routeur partagé (tools/tool_router.py).
 
-    user_text = _get_current_user_text(
-        messages
-    )
-
-    router_text = _normalize_router_text(
-        user_text
-    )
-
-    selected_tools, intents = route_tools(
-        router_text,
+    Liste vide uniquement pour une conversation pure ; sinon au moins le lot
+    d'outils de lecture par défaut (Router V0.4 renvoyait 0 outil dans ~80 %
+    des demandes réelles, et gpt-oss répondait alors à vide).
+    """
+    user_text = _get_current_user_text(messages)
+    selected_tools, info = select_tools(
+        user_text,
         TOOLS_DEFINITIONS,
         max_tools=ROUTER_MAX_TOOLS,
     )
 
-    if PERF_LOG and router_text != _normalize_for_matching(user_text):
+    if PERF_LOG:
         console.print(
             "[dim #7a5f38]"
-            f"[ROUTER V0.4] normalisation: {router_text}"
+            f"[ROUTER] {len(TOOLS_DEFINITIONS)} → {len(selected_tools)} outils "
+            f"| niveau={info['niveau']} | catégories={info['categories'][:4]}"
             "[/dim #7a5f38]"
         )
 
-    if is_simple_chat(router_text):
-        if PERF_LOG:
-            console.print(
-                "[dim #7a5f38]"
-                "[ROUTER V0.4] conversation → 0 outil"
-                "[/dim #7a5f38]"
-            )
+    return selected_tools, info["intentions"] or info["categories"] or [info["niveau"]]
 
-        return [], intents
-
-    # Capability Bridge : pour les demandes multi-capacités, compléter localement
-    # la sélection du Router sans dépasser la petite limite d'outils.
-    if USE_CAPABILITY_BRIDGE_V01:
-        capability_plan = build_capability_plan(
-            user_text,
-            TOOL_FUNCTIONS,
-            max_tools=ROUTER_MAX_TOOLS,
-        )
-        if capability_plan.tools:
-            selected_tools = merge_tools(
-                selected_tools,
-                capability_plan,
-                TOOLS_DEFINITIONS,
-                max_tools=ROUTER_MAX_TOOLS,
-            )
-            if PERF_LOG:
-                console.print(
-                    "[dim #7a5f38]"
-                    f"[CAPABILITY BRIDGE V0.1] capacités={capability_plan.capabilities} "
-                    f"| outils={capability_plan.tools} "
-                    f"| confiance={capability_plan.confidence:.2f}"
-                    "[/dim #7a5f38]"
-                )
-            if selected_tools:
-                return selected_tools, intents + ["capability_bridge"] if intents else ["capability_bridge"]
-
-    if selected_tools:
-        if PERF_LOG:
-            console.print(
-                "[dim #7a5f38]"
-                f"[ROUTER] {len(TOOLS_DEFINITIONS)} → "
-                f"{len(selected_tools)} outils "
-                f"| intentions={intents}"
-                "[/dim #7a5f38]"
-            )
-
-        return selected_tools, intents
-
-    # Planner : pour les demandes complexes, fournir uniquement les outils
-    # strictement nécessaires, sans revenir au lot global.
-    if planner_plan and planner_plan.tools:
-        wanted = set(planner_plan.tools)
-        planned = [
-            tool for tool in TOOLS_DEFINITIONS
-            if _tool_name(tool) in wanted
-        ]
-        if planned:
-            if PERF_LOG:
-                console.print(
-                    "[dim #7a5f38]"
-                    f"[PLANNER V0.1] {len(planned)} outils planifiés "
-                    f"| type={planner_plan.kind}"
-                    "[/dim #7a5f38]"
-                )
-            return planned, ["planner_v01"]
-
-    if PERF_LOG:
-        console.print(
-            "[yellow]"
-            "[ROUTER V0.4] aucune intention reconnue → 0 outil (LLM sans outils)"
-            "[/yellow]"
-        )
-
-    return (
-        [],
-        ["no_intent"],
-    )
 
 
 # ============================================================================
@@ -1426,8 +820,27 @@ def _pretty_tool_result(
         return data
 
     if isinstance(data, dict):
+        if data.get("refuse"):
+            return str(data.get("error") or "Action annulée.")
         if "error" in data:
             return f"Erreur de {tool_name} : {data['error']}"
+
+        # Formats propres à certains outils (sinon le JSON brut était affiché)
+        if tool_name == "add_days" and data.get("date"):
+            jour = str(data.get("jour") or "").lower()
+            return f"Dans {data.get('dans', '')}, nous serons le {jour + ' ' if jour else ''}{data['date']}."
+        if tool_name == "convert_units" and data.get("formatte"):
+            return str(data["formatte"])
+        if tool_name == "analyze_screen" and data.get("analyse"):
+            return str(data["analyse"]).strip()
+        if tool_name in ("screenshot_full", "take_screenshot") and (data.get("fichier") or data.get("path")):
+            return f"Capture d'écran enregistrée : {data.get('fichier') or data.get('path')}"
+        if tool_name == "run_command":
+            output = str(data.get("sortie") or "").strip()
+            command = str(data.get("commande") or "").strip()
+            if output:
+                return f"Résultat de « {command} » :\n{output}"
+            return f"Commande « {command} » exécutée, sans sortie."
 
         if tool_name == "get_datetime":
             date_value = data.get("date")
@@ -1745,7 +1158,7 @@ def chat(
                 )
             return "Quel modèle veux-tu utiliser comme référence pour la comparaison ?"
 
-        if context.is_pure_context_update(user_text):
+        if _is_local_context_update(context, user_text):
             if PERF_LOG:
                 console.print(
                     "[dim #7a5f38]"
@@ -1754,7 +1167,7 @@ def chat(
                 )
             return "D'accord, je garde cette information pour la suite."
 
-        if context.is_context_statement(user_text):
+        if context.is_context_statement(user_text) and not _has_actionable_request(user_text):
             if PERF_LOG:
                 console.print(
                     "[dim #7a5f38]"
@@ -1900,6 +1313,20 @@ def chat(
                                 f"{tool_name} sans LLM"
                                 f" | {elapsed_ms:.1f} ms"
                                 "[/dim #7a5f38]"
+                            )
+
+                        # Une liste de liens ne répond pas à la question :
+                        # courte synthèse par FINAL_MODEL (quota séparé).
+                        if tool_name == "web_search":
+                            return _finalize_with_llm(
+                                client,
+                                original_system_content,
+                                user_text,
+                                [{
+                                    "name": tool_name,
+                                    "result": result[:2000],
+                                    "verification": _verify_generic_tool_result(tool_name, result),
+                                }],
                             )
 
                         return _pretty_tool_result(

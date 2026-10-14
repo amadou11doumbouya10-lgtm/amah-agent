@@ -16,6 +16,10 @@ from dotenv import load_dotenv
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
+from tools.tool_router import select_tools
+from tools.instant import instant_reply
+from tools.memory_context import memory_context, memory_instruction, SUMMARY_SYSTEM as MEMORY_SUMMARY_SYSTEM
+from tools.memory_recall_v024 import format_recall
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
 from webcam_monitor import WebcamMonitor
@@ -688,6 +692,29 @@ class AmahGUI:
         last_user = next(
             (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
         )
+
+        # Heure, date, calcul simple : réponse locale immédiate, sans appel IA
+        instant = instant_reply(last_user)
+        if instant:
+            self._finish_local_reply(instant)
+            return
+
+        # "Tu te souviens de ce qu'on avait dit sur…" : rappel de l'historique
+        try:
+            memory, direct = memory_context(last_user, summarize_fn=self._summarize_memory)
+        except Exception:
+            memory, direct = None, False
+        if memory and direct:
+            recalled = format_recall(memory)
+            if recalled:
+                self._finish_local_reply(recalled)
+                return
+        system_original = None
+        instruction = memory_instruction(memory) if memory else ""
+        if instruction:
+            system_original = self.messages[0]["content"]
+            self.messages[0]["content"] = system_original + instruction
+
         tools  = self._select_tools(last_user)
         stream = self._is_simple_query(last_user, tools)
         try:
@@ -702,22 +729,31 @@ class AmahGUI:
             self.root.after(0, finish, reply)
         except Exception as e:
             self.root.after(0, self._show_error, self._format_error(str(e)))
+        finally:
+            # La mémoire ne sert qu'à ce tour : ne pas l'accumuler dans le prompt
+            if system_original is not None:
+                self.messages[0]["content"] = system_original
+
+    def _finish_local_reply(self, reply: str):
+        """Réponse produite sans appel IA (instantanée ou mémoire)."""
+        self.messages.append({"role": "assistant", "content": reply})
+        save_message(self.session_id, "assistant", reply)
+        self.root.after(0, self._show_reply, reply)
+
+    def _summarize_memory(self, prompt: str) -> str:
+        """Synthèse JSON demandée par le rappel de mémoire (sans outils)."""
+        response = self.groq.chat(
+            [{"role": "system", "content": MEMORY_SUMMARY_SYSTEM},
+             {"role": "user", "content": prompt}],
+            model=MODEL, max_tokens=900, temperature=0.2,
+        )
+        return response.choices[0].message.content or ""
 
     def _is_simple_query(self, text: str, tools) -> bool:
-        """Question courte et purement conversationnelle (salutation, accuse de
-        reception...) -> reponse rapide par le 8B sans outils, eligible au
-        streaming. On retire volontairement qui/quand/combien/pourquoi/comment/
-        c'est quoi : ces mots servent autant a des phrases sociales qu'a de
-        vraies questions factuelles, qui doivent passer par le 70B + web_search
-        (REGLE FACTUELLE du system prompt) pour eviter les reponses inventees."""
-        SIMPLE_PATTERNS = {
-            "bonjour","bonsoir","salut","hello","hi","merci","ok","oui","non",
-            "dis","repete","aide","help","test","essai",
-        }
-        words_lower = set(text.lower().replace("'", " ").split())
-        return (len(text.split()) <= 6 and
-                bool(words_lower & SIMPLE_PATTERNS) and
-                not tools)
+        """Conversation pure (le routeur n'a proposé aucun outil) -> réponse
+        rapide en streaming par le 20b. Une vraie question factuelle reçoit au
+        moins le lot d'outils par défaut (dont web_search) et passe par _chat."""
+        return tools is None
 
     def _chat_stream(self):
         """Reponse en streaming pour les questions simples/conversationnelles
@@ -1077,214 +1113,11 @@ class AmahGUI:
         win.after(60000, _on_close)  # coupure auto apres 60s (vie privee)
         win.after(100, _update_frame)
 
-    # Mots clés → catégorie d'outils (élargi pour couvrir un maximum de cas)
-    _WORD_TO_CAT = {
-        # fichiers
-        # projets / tâches → mémoire (get_memories) d'abord, puis fichiers si nécessaire
-        "projet":"memoire","projets":"memoire","tache":"memoire","taches":"memoire",
-        "rappelle":"memoire","souviens":"memoire","sais":"memoire",
-        # fichiers
-        "liste":"fichiers","lister":"fichiers","fichier":"fichiers","fichiers":"fichiers",
-        "dossier":"fichiers","dossiers":"fichiers","trouve":"fichiers","trouver":"fichiers",
-        "deplace":"fichiers","organise":"fichiers","organiser":"fichiers","classe":"fichiers",
-        "lis":"fichiers","lire":"fichiers","lit":"fichiers","affiche":"fichiers",
-        "montre":"fichiers","montre-moi":"fichiers","montrer":"fichiers","vois":"fichiers",
-        "find":"fichiers","read":"fichiers","bureau":"fichiers","desktop":"fichiers",
-        "downloads":"fichiers","telechargements":"fichiers","taille":"fichiers",
-        "renomme":"fichiers","supprime":"fichiers","copie":"fichiers",
-        # écriture / modification de fichiers → systeme ou fichiers
-        "modifie":"fichiers","modifier":"fichiers","change":"fichiers","changer":"fichiers",
-        "ecris":"fichiers","ecrire":"fichiers","remplace":"fichiers","remplacer":"fichiers",
-        "corrige":"fichiers","corriger":"fichiers","mets":"fichiers","mettre":"fichiers",
-        "insere":"fichiers","inserer":"fichiers","ajoute":"fichiers","ajouter":"fichiers",
-        "supprime-ligne":"fichiers","edite":"fichiers","editer":"fichiers",
-        # extensions de fichiers → toujours catégorie fichiers
-        "html":"fichiers","htm":"fichiers","index":"fichiers","css":"fichiers",
-        "js":"fichiers","py":"fichiers","json":"fichiers","xml":"fichiers",
-        "csv":"fichiers","log":"fichiers","ini":"fichiers","cfg":"fichiers",
-        "exe":"fichiers","bat":"fichiers","sh":"fichiers","md":"fichiers",
-        # documents
-        "word":"documents","pdf":"documents","txt":"documents","document":"documents",
-        "rapport":"documents","cree":"documents","creer":"documents","genere":"documents",
-        "generer":"documents","redige":"documents","rediger":"documents","ecrit":"documents",
-        "ecrire":"documents","prepare":"documents",
-        "write":"documents","create":"documents","make":"documents","resume":"documents",
-        "synthese":"documents","lettre":"documents","contrat":"documents","facture":"documents",
-        # internet / navigateur
-        "web":"internet","recherche":"internet","rechercher":"internet","site":"internet",
-        "navigateur":"internet","visite":"internet",
-        "cherche":"internet","chercher":"internet","url":"internet",
-        "click":"internet","clique":"internet","screenshot":"internet","capture":"internet",
-        "telecharge":"internet","linkedin":"internet","google":"internet","youtube":"internet",
-        "instagram":"internet","navigue":"internet",
-        "page":"internet","contenu":"internet","lis-la":"internet","scrape":"internet",
-        # cartes / images cherchees en ligne (pas des fichiers locaux)
-        "carte":"internet","cartes":"internet","drapeau":"internet","drapeaux":"internet",
-        # ouvrir = systeme (open_file) EN PRIORITÉ sur internet
-        # L'utilisateur dit "ouvre" pour ouvrir un fichier/dossier local
-        "ouvre":"systeme","ouvrir":"systeme","open":"systeme","va":"systeme","vas":"systeme",
-        "lance":"systeme","lancer":"systeme","affiche":"systeme","afficher":"systeme",
-        "editeur":"systeme","vscode":"systeme","notepad":"systeme","montre":"systeme",
-        # email
-        "email":"email","emails":"email","mail":"email","mails":"email","boite":"email",
-        "envoie":"email","envoyer":"email","lis-mes":"email","dernier-email":"email",
-        "send":"email","gmail":"email","message":"email","reponse":"email","repond":"email",
-        "expediteur":"email","sujet":"email","piece":"email","jointe":"email",
-        "inbox":"email","reception":"email","nouveau":"email","nouveaux":"email",
-        "non-lu":"email","nonlu":"email",
-        "messagerie":"email","courrier":"email","courriel":"email",
-        # mémoire
-        "memorise":"memoire","souviens":"memoire","rappelle":"memoire","memoire":"memoire",
-        "retiens":"memoire","note":"memoire","notes":"memoire","oublie":"memoire",
-        "sais":"memoire","sait":"memoire","preference":"memoire","info":"memoire",
-        # système
-        "systeme":"systeme","processus":"systeme","process":"systeme","reseau":"systeme",
-        "ip":"systeme","commande":"systeme","run":"systeme","execute":"systeme",
-        "lance":"systeme","ferme":"systeme","ram":"systeme","cpu":"systeme",
-        "disque":"systeme","windows":"systeme","pc":"systeme","ordinateur":"systeme",
-        # utilitaires / calcul
-        "calcule":"utils","calculer":"utils","convertis":"utils","convertir":"utils",
-        "date":"utils","heure":"utils","password":"utils","passe":"utils","genere":"utils",
-        "zip":"utils","archive":"utils","qr":"utils","code":"utils","qrcode":"utils",
-        "combien":"utils","quel":"utils","quand":"utils","dans":"utils","depuis":"utils",
-        "ajoute":"utils","ajouter":"utils","jours":"utils","mois":"utils","annee":"utils",
-        # data (Excel, presse-papiers)
-        "excel":"data","tableau":"data","tableur":"data","xlsx":"data","csv":"data",
-        "clipboard":"data","presse-papiers":"data","copier":"data","coller":"data",
-        "contenu-presse":"data","presse":"data",
-        # médias / voix
-        "parle":"media","dis":"media","dis-moi":"media","voix":"media","speak":"media",
-        "ecoute":"media","microphone":"media","micro":"media","notification":"media",
-        "notifie":"media","alerte":"media","rappel":"media","rappelle-moi":"media",
-        "dans-x-minutes":"media","dans-x-heures":"media","bip":"media",
-        "screenshot-ecran":"media","capture-ecran":"media",
-        # images
-        "image":"images","images":"images","photo":"images","photos":"images",
-        "redimensionne":"images","resize":"images","convertis-image":"images",
-        "png":"images","jpg":"images","jpeg":"images","webp":"images","bmp":"images",
-        # météo / info / traduction
-        "meteo":"info","temps":"info","temperature":"info","previsions":"info",
-        "traduis":"info","traduire":"info","traduction":"info","langue":"info",
-        "translate":"info","stats":"info","statistiques":"info","version":"info",
-        "licence":"info","mise-a-jour":"info","update":"info","pluie":"info","soleil":"info",
-        # planificateur taches
-        "planifie":"planif","planifier":"planif","tache":"planif","taches":"planif",
-        "planificateur":"planif","cron":"planif","automatique":"planif","chaque":"planif",
-        "quotidien":"planif","hebdo":"planif","programme":"planif",
-        # hardware / parametres systeme (v1.4)
-        "volume":"hardware","son":"hardware","audio":"hardware","muet":"hardware",
-        "silence":"hardware","sourd":"hardware","bascule":"hardware",
-        "lumiere":"hardware","luminosite":"hardware","lumineux":"hardware",
-        "sombre":"hardware","clarte":"hardware","eclairer":"hardware","assombrir":"hardware",
-        "wifi":"hardware","wi-fi":"hardware","sans-fil":"hardware","wlan":"hardware",
-        "bluetooth":"hardware","reseau-wifi":"hardware",
-        # vision ecran (v1.4+)
-        "vois-ecran":"vision","regarde-ecran":"vision","observe":"vision",
-        "analyse-mon-ecran":"vision","que-vois-tu":"vision","vision":"vision",
-        "vois-tu":"vision","regardes":"vision","captur":"vision",
-        # mots seuls ou paires qui signifient "regarde ce qui est sur l'ecran"
-        "ecran":"vision","mon-ecran":"vision","sur-ecran":"vision",
-        "l-ecran":"vision","lis-ecran":"vision","lire-ecran":"vision",
-        "que-vois":"vision","regarde":"vision","vois":"vision",
-        "lit-ecran":"vision","ecrat":"vision","quoi-sur":"vision",
-        # youtube (v1.4)
-        "youtube":"youtube","yt":"youtube","video":"youtube","videos":"youtube",
-        "musique":"youtube","chanson":"youtube","chansons":"youtube",
-        "film":"youtube","films":"youtube","serie":"youtube","clip":"youtube",
-        # vols / voyages (v1.4)
-        "vol":"flights","vols":"flights","avion":"flights","avions":"flights",
-        "billet":"flights","aeroport":"flights","voyage":"flights","voyager":"flights",
-        "depart":"flights","arrivee":"flights","aller":"flights","retour":"flights",
-        "skyscanner":"flights","kayak":"flights","booking":"flights",
-        # planification multi-etapes (v1.4)
-        "plan":"planner","etapes":"planner","etape-par-etape":"planner",
-        "objectif-complexe":"planner","fais-tout":"planner","execute-plan":"planner",
-        "multi-etapes":"planner","sequence":"planner",
-        # suppression fichier (v1.5)
-        "supprime":"fichiers","supprimer":"fichiers","efface":"fichiers","effacer":"fichiers",
-        "vide":"fichiers","retire":"fichiers","enleve":"fichiers","enlever":"fichiers",
-        # résumé / analyse document (v1.5)
-        "resume":"documents","resumer":"documents","resumé":"documents","synthese":"documents",
-        "analyse":"documents","analyser":"documents","lis":"documents","explique-moi":"documents",
-        # brouillon email (v1.5)
-        "brouillon":"email","redige-email":"email","prépare-email":"email","draft":"email",
-        # processus / kill (v1.5)
-        "ferme":"systeme","tuer":"systeme","stoppe":"systeme","stopper":"systeme",
-        "termine":"systeme","terminer":"systeme","quitte":"systeme","coupe":"systeme",
-        "fige":"systeme","plante":"systeme","bloque":"systeme",
-        # code (v1.5)
-        "code":"code","coder":"code","programme":"code","programmer":"code",
-        "script":"code","executer":"code","exécute":"code","exécuter":"code",
-        "lancer-script":"code","lance-script":"code","python":"code","javascript":"code",
-        "node":"code","debug":"code","debugue":"code","explique-code":"code",
-        # musique (v1.5)
-        "musique":"youtube","chanson":"youtube","chansons":"youtube","joue":"youtube",
-        "jouer":"youtube","mets":"youtube","ecouter":"youtube","écoute":"youtube",
-        "music":"youtube","song":"youtube","play":"youtube",
-        # jeux Steam/Epic (v1.5)
-        "steam":"jeux","epic":"jeux","epicgames":"jeux","jeu":"jeux","jeux":"jeux",
-        "gamer":"jeux","videogame":"jeux","installe-jeu":"jeux","demarre-jeu":"jeux",
-        # webcam (v1.5)
-        "webcam":"webcam","camera":"webcam","cam":"webcam","auto-mute":"webcam",
-        "automute":"webcam",
-    }
-
-    # Catégories → noms d'outils inclus
-    _EXT_TO_CAT = {
-        ".xlsx": "data", ".xlsm": "data", ".csv": "data",
-        ".docx": "documents", ".pdf": "documents", ".txt": "documents", ".md": "documents",
-        ".py": "code", ".js": "code", ".html": "code", ".css": "code", ".json": "code",
-        ".png": "images", ".jpg": "images", ".jpeg": "images", ".webp": "images",
-    }
-
-    _CAT_TOOLS = {
-        "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
-        "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf","summarize"},
-        "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
-        "email":     {"read_emails","send_email","search_emails","draft_email","open_browser","get_page_text","click_text"},
-        "memoire":   {"save_memory","get_memories","delete_memory"},
-        "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},
-        "code":      {"write_code","run_code","explain_code","read_file","write_file","edit_file"},
-        "utils":     {"calculate","get_datetime","add_days","generate_password","convert_units","zip_files","unzip_file","list_archive","create_qrcode"},
-        "data":      {"read_excel","create_excel","append_to_excel","read_clipboard","write_clipboard"},
-        "media":     {"speak","listen","listen_continuous","send_notification","set_reminder","screenshot_full"},
-        "images":    {"resize_image","get_image_info","convert_image"},
-        "info":      {"get_weather","get_weather_simple","translate","detect_language","get_stats","check_update","get_current_version","get_license_info"},
-        "planif":    {"create_daily_task","list_tasks","delete_task","run_task_now"},
-        # Nouveaux (v1.4)
-        "hardware":  {"set_volume","get_audio_level","mute_audio","set_brightness","get_brightness","wifi_toggle"},
-        "vision":    {"analyze_screen","screenshot_full"},
-        "youtube":   {"open_youtube","search_youtube","play_music","open_browser","web_search"},
-        "flights":   {"search_flights","web_search","open_browser"},
-        "planner":   {"create_plan","execute_plan"},
-        "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
-                       "launch_game_steam","search_game_on_steam","install_game_steam"},
-        "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
-    }
-
     def _select_tools(self, message: str):
-        """Retourne la sous-liste TOOLS_DEFINITIONS pertinente, ou None si pas d'outil."""
-        import unicodedata
-        # Supprime les accents pour que "météo" matche "meteo", "crée" → "cree", etc.
-        nfd = unicodedata.normalize("NFD", message.lower().replace("'", " "))
-        clean = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
-        words = clean.split()
-        cats = set()
-        for w in words:
-            cat = self._WORD_TO_CAT.get(w)
-            if cat:
-                cats.add(cat)
-            # Un chemin ("C:/x/ventes.xlsx") forme un seul mot : son extension
-            # indique les bons outils (sinon read_excel n'etait jamais propose).
-            ext_cat = self._EXT_TO_CAT.get(os.path.splitext(w.rstrip(".,;:!?)"))[1])
-            if ext_cat:
-                cats.add(ext_cat)
-        if not cats:
-            return None
-        needed = set()
-        for cat in cats:
-            needed |= self._CAT_TOOLS.get(cat, set())
-        return [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in needed]
+        """Outils à proposer (routeur partagé tools/tool_router.py), ou None pour
+        une conversation pure (salutation, remerciement)."""
+        tools, _info = select_tools(message, TOOLS_DEFINITIONS)
+        return tools or None
 
     def _trim_messages(self):
         """Garde system prompt + MAX_MESSAGES derniers messages.
@@ -1351,8 +1184,7 @@ class AmahGUI:
             # peut donc jamais s'en charger. On relance avec tous les outils
             # plutot que de remonter cette erreur a l'utilisateur.
             if "not in request.tools" in str(e):
-                from groq_client import repair_tool_use_failed as _rtuf
-                _rep = _rtuf(e)
+                _rep = repair_tool_use_failed(e)
                 if _rep:
                     _extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == resolve_tool_name(_rep[0])]
                     tools = list(tools or []) + _extra
@@ -1416,8 +1248,10 @@ class AmahGUI:
                                            model_override=MODEL)  # toujours 70B pour tool use
             except Exception as e:
                 if "not in request.tools" in str(e):
-                    # Ajoute uniquement l'outil manquant au lieu d'envoyer les 99
-                    from groq_client import repair_tool_use_failed
+                    # Ajoute uniquement l'outil manquant au lieu d'envoyer les 99.
+                    # (Pas d'import local ici : il rendait repair_tool_use_failed
+                    # "variable locale" dans tout _chat, et la réparation du
+                    # premier appel plantait en UnboundLocalError.)
                     repaired = repair_tool_use_failed(e)
                     if repaired:
                         missing_name = resolve_tool_name(repaired[0])

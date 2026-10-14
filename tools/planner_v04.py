@@ -255,15 +255,9 @@ def build_plan(user_text: str, context: Any = None) -> Optional[PlannerPlan]:
 
     if _comparison_requested(text):
         if len(models) < 2:
-            return PlannerPlan(
-                kind="clarification",
-                objective="comparaison",
-                tools=[],
-                constraints=constraints,
-                models=models,
-                clarification="Quels modèles veux-tu comparer ?",
-                requires_synthesis=False,
-            )
+            # "compare Python et JavaScript", "liste les fichiers entre…" : pas
+            # une comparaison de modèles identifiés -> le LLM s'en charge.
+            return None
 
         steps: List[PlannerStep] = []
         for index, model in enumerate(models[:4], start=1):
@@ -290,7 +284,13 @@ def build_plan(user_text: str, context: Any = None) -> Optional[PlannerPlan]:
             requires_synthesis=True,
         )
 
-    if _recommendation_requested(text) or _research_requested(text):
+    # Un plan de recherche n'a de sens que pour des produits identifiés ou un
+    # vrai contexte d'achat ; sinon "quel est le meilleur moyen de zipper un
+    # dossier" ou "trouve le fichier X" partaient en recherche web.
+    shopping = bool(re.search(
+        r"\b(?:prix|acheter|achat|offre|disponible|budget|gnf|fcfa)\b", _norm(text)
+    ))
+    if (_recommendation_requested(text) or _research_requested(text)) and (models or shopping):
         query_parts = [topic]
         if models:
             query_parts = models[:4]
@@ -319,25 +319,9 @@ def build_plan(user_text: str, context: Any = None) -> Optional[PlannerPlan]:
             requires_synthesis=True,
         )
 
-    if topic:
-        return PlannerPlan(
-            kind="analysis",
-            objective=f"analyser {topic}",
-            tools=["web_search"],
-            constraints=constraints,
-            models=models[:4],
-            steps=[
-                PlannerStep(
-                    step_id="search_1",
-                    action="search",
-                    tool_name="web_search",
-                    args={"query": _clean(topic), "num_results": 5},
-                    purpose="collecter des éléments vérifiables",
-                )
-            ],
-            requires_synthesis=True,
-        )
-
+    # Plus de plan "analysis" générique : il transformait toute phrase contenant
+    # "analyse", "selon", "pour moi"… en recherche web sur la phrase elle-même
+    # ("analyse le fichier ventes.xlsx" -> web_search "analyse fichier C Users").
     return None
 
 

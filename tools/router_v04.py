@@ -34,16 +34,17 @@ from tools.router_v03 import (
 # CORRECTIONS COURANTES DE TYPE SMS / ORTHOGRAPHE
 # ---------------------------------------------------------------------------
 
+# N'utiliser que des formes qui ne sont pas de vrais mots français : "leur",
+# "eur", "peu", "sa", "fer", "di", "pe" ont été retirés car ils changeaient le
+# sens de phrases normales ("dis-leur" -> "dis heure", "500 eur" -> "500 heure").
+# Depuis tools/tool_router.py, ce module ne sert plus qu'à normaliser le texte
+# du raccourci heure/date d'agent.py.
 COMMON_REPLACEMENTS: Dict[str, str] = {
     # Heure / date
     "heur": "heure",
     "heurs": "heures",
     "heurre": "heure",
-    "heures": "heures",
     "lheur": "l heure",
-    "leur": "heure",
-    "leure": "heure",
-    "eur": "heure",
 
     # Question / formulation
     "kel": "quel",
@@ -55,17 +56,10 @@ COMMON_REPLACEMENTS: Dict[str, str] = {
     "keske": "qu est ce",
     "c koi": "c est quoi",
     "mwa": "moi",
-    "toi": "toi",
 
     # Verbes fréquents
     "fai": "fais",
     "fé": "fais",
-    "fer": "faire",
-    "di": "dis",
-    "dit": "dit",
-    "donne moi": "donne moi",
-    "peu": "peux",
-    "pe": "peux",
     "vou": "veux",
     "veu": "veux",
     "cherch": "cherche",
@@ -73,11 +67,7 @@ COMMON_REPLACEMENTS: Dict[str, str] = {
     "ouvr": "ouvre",
     "lanc": "lance",
     "instal": "installe",
-    "telecharg": "télécharge",
-
-    # Petites variantes déjà vues dans le projet
-    "ecran": "écran",
-    "sa": "ça",
+    "telecharg": "telecharge",
 }
 
 

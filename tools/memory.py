@@ -105,13 +105,26 @@ def get_memories(category: str = None) -> dict:
     try:
         conn = _connect()
         if category:
+            # Le modèle passe souvent un sujet ("couleur préférée") au lieu
+            # d'une catégorie ("preferences") : chercher aussi dans le contenu,
+            # puis tout renvoyer plutôt que répondre "aucun souvenir" à tort.
             rows = conn.execute(
-                "SELECT id, category, content, created_at FROM memories WHERE category=? ORDER BY id DESC LIMIT 30",
-                (category,)
+                "SELECT id, category, content, created_at FROM memories "
+                "WHERE category = ? OR (category != 'conversation_summary' AND content LIKE ?) "
+                "ORDER BY id DESC LIMIT 30",
+                (category, f"%{category}%")
             ).fetchall()
+            if not rows:
+                rows = conn.execute(
+                    "SELECT id, category, content, created_at FROM memories "
+                    "WHERE category != 'conversation_summary' ORDER BY id DESC LIMIT 30"
+                ).fetchall()
         else:
+            # Les résumés JSON mis en cache par le rappel de mémoire (V0.2.4) ne
+            # sont pas des souvenirs de l'utilisateur : ne pas les lui afficher.
             rows = conn.execute(
-                "SELECT id, category, content, created_at FROM memories ORDER BY id DESC LIMIT 30"
+                "SELECT id, category, content, created_at FROM memories "
+                "WHERE category != 'conversation_summary' ORDER BY id DESC LIMIT 30"
             ).fetchall()
         conn.close()
         memories = [{"id": r[0], "categorie": r[1], "contenu": r[2], "date": r[3]} for r in rows]

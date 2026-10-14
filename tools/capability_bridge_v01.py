@@ -44,7 +44,9 @@ CAPABILITY_PATTERNS: Dict[str, Sequence[str]] = {
     "screen": (
         "regarde mon écran", "regarde mon ecran", "analyse mon écran",
         "analyse mon ecran", "ce qu'il y a sur mon écran",
-        "ce qu il y a sur mon ecran", "capture d'écran", "capture d ecran",
+        "ce qu il y a sur mon ecran",
+        # "capture d'écran" retiré : c'est une demande d'enregistrer l'image
+        # (FastPath screenshot), pas de la faire analyser par l'IA.
         "explique ce que tu vois sur mon écran",
         "explique ce que tu vois sur mon ecran",
     ),

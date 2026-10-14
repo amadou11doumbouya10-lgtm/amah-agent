@@ -1,24 +1,27 @@
 # Amah Agent Local
 
 ## Présentation
-Agent IA local sur PC Windows. Cerveau : Groq (Llama 3.3, gratuit) + mode vocal
-temps réel Gemini Live. 99 outils réels.
+Agent IA local sur PC Windows. Cerveau : Groq (gpt-oss-120b / gpt-oss-20b,
+gratuit) + mode vocal temps réel Gemini Live. 99 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
-Version actuelle : **v1.5.1**
+Version actuelle : **v1.5.2** (source unique : `CURRENT_VERSION` dans tools/updater.py)
 
 ## Structure
 ```
 amah-agent/
-├── agent.py                  ← Interface terminal (Rich, couleurs or/sombre)
-├── gui.py                    ← Interface graphique tkinter (écran config + chat)
+├── agent.py                  ← Interface terminal (Rich, usage développeur, pipeline v0.x)
+├── gui.py                    ← Interface graphique tkinter (clients, compilée dans le .exe)
 ├── voice_fullscreen.py       ← Interface vocale plein écran (HUD, mode normal + mode Live F9)
 ├── amah_listener.py          ← Mot de réveil "Amah" (widget discret, lance voice_fullscreen)
-├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés,
-│                                 repli dev sur proxy LiteLLM via LITELLM_URL)
+├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés sans
+│                                 attente sur 429, repli dev sur proxy LiteLLM via
+│                                 LITELLM_URL avec sonde de port, réparation gpt-oss)
 ├── gemini_tools.py           ← Sous-ensemble 33 outils + adaptateur schema pour Gemini Live
 ├── gemini_client.py          ← Session Gemini Live (audio temps réel + function calling)
-├── config.py                 ← Modèle, système prompt, 99 définitions outils
+├── config.py                 ← Modèles (MODEL, FINAL_MODEL), prompts, 99 définitions outils
+├── system_prompt.txt         ← Texte du prompt système (~3 700 tokens avec le profil)
+├── user_profile.txt          ← Profil utilisateur ajouté au prompt système
 ├── create_shortcut.py        ← Crée le raccourci .lnk sur le bureau
 ├── amah_memory.db            ← Base SQLite mémoire persistante (auto-créée)
 ├── amah.spec                 ← Spec PyInstaller pour le packaging .exe
@@ -34,7 +37,26 @@ amah-agent/
 ├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
 ├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
-│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (99 outils)
+│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (99 outils) : registre qui
+│   │                            corrige les noms gpt-oss, garde-fou + statistiques
+│   │   ── Pipeline partagé (gui.py, voice_fullscreen.py, agent.py) ──
+│   ├── tool_router.py        ← Routeur d'outils unique (4 niveaux, 0 à 12 outils)
+│   ├── instant.py            ← Réponses sans IA : heure, date, calcul simple
+│   ├── memory_context.py     ← Rappel de mémoire V0.2.4 ("tu te souviens…")
+│   ├── guard.py              ← Confirmation des actions sensibles (refus par défaut)
+│   │   ── Briques v0.x utilisées ──
+│   ├── router_v03.py         ← Intentions précises (utilisées par tool_router)
+│   ├── router_v04.py         ← Ne sert plus qu'à normaliser le texte heure/date
+│   ├── memory_recall_v024.py ← Moteur de rappel mémoire (+ conversation_search_v022.py)
+│   ├── context_v01.py        ← Contexte de conversation (agent.py)
+│   ├── planner_v04.py        ← Comparaison/recommandation de produits (agent.py)
+│   ├── planner_v06.py        ← Recherche approfondie, tout sujet (agent.py)
+│   ├── executor_v03.py       ← Exécution vérifiée des plans (+ executor_v02, verification_v02)
+│   ├── security_v02.py       ← Confirmation terminal (agent.py)
+│   ├── capability_bridge_v01.py ← Workflows écran / navigateur+voix (agent.py)
+│   ├── fastpath_v01.py       ← Capture, calcul, recherche directe (agent.py)
+│   ├── voice_pipeline_v01.py ← Commande vocale dans le terminal (agent.py)
+│   │   ── Outils ──
 │   ├── files.py              ← Gestion fichiers/dossiers (7 outils)
 │   ├── documents.py          ← Création Word/PDF/TXT, lecture (4 outils)
 │   ├── search.py             ← Recherche DuckDuckGo + lecture page web (2 outils)
@@ -51,7 +73,7 @@ amah-agent/
 │   ├── archive.py            ← Archives ZIP (3 outils)
 │   ├── image_tool.py         ← Images + réseau + processus (6 outils)
 │   ├── meteo.py              ← Météo wttr.in (2 outils)
-│   ├── translator.py         ← Traduction deep-translator (2 outils)
+│   ├── translator.py         ← Traduction Google + repli gpt-oss-20b (2 outils)
 │   ├── qrcode_tool.py        ← Génération QR codes (1 outil)
 │   ├── voice_recognition.py  ← Reconnaissance vocale (2 outils)
 │   ├── scheduler.py          ← Planificateur Windows (4 outils)
@@ -103,9 +125,13 @@ build.bat                                 # compiler le .exe pour distribution
 ## Clés requises
 ### Groq (obligatoire)
 - Gratuit sur https://console.groq.com
-- 30 requêtes/minute, 14 400/jour
+- Limites gratuites par clé (gpt-oss-120b et gpt-oss-20b, chacun son quota) :
+  8 000 tokens/minute, 200 000 tokens/jour, 1 000 requêtes/jour
+- Le prompt système pèse ~3 700 tokens par appel → ~40 demandes avec outils
+  par clé et par jour sur le 120b (la limite réelle est le quota journalier)
 - Format : gsk_...
-- Rotation 3 clés : GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3 → 200 appels/jour
+- Rotation 3 clés : GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3 (organisations
+  Groq distinctes, quotas séparés) ; sur 429, bascule immédiate sur la clé suivante
 
 ### Gmail (optionnel)
 - Compte : contact.amah.officiel@gmail.com
@@ -124,15 +150,36 @@ build.bat                                 # compiler le .exe pour distribution
   local en remplacement de Groq direct — quota illimité, failover multi-providers
 - Invisible pour les clients : ils n'ont pas LITELLM_URL dans leur .env, donc
   toujours sur Groq direct
-- Si le proxy n'est pas lancé (connexion refusée), repli silencieux et
-  automatique sur Groq direct dans groq_client.py
+- Si le proxy n'est pas lancé, repli automatique sur Groq direct : une sonde
+  de port (0,3 s) évite les ~16 s perdues au premier appel sous Windows
 - Config/scripts de lancement (litellm_config.yaml, start_litellm.bat/py) sont
   gitignorés — jamais livrés aux clients
 
-## Modèles utilisés (routage automatique)
-- **Questions simples** (≤6 mots, salutation) : `llama-3.1-8b-instant` (~0.3s)
-- **Tâches avec outils** : `llama-3.3-70b-versatile` (~2s)
-- Défini dans gui.py → `_chat()` + constante `MODEL` dans config.py
+## Modèles utilisés
+Llama 3.3 70B, Llama 3.1 8B et llama-4-scout ont été retirés par Groq (404).
+- **Outils** : `openai/gpt-oss-120b` (`MODEL` dans config.py)
+- **Conversation pure, reformulation après outils (agent.py), traduction de
+  repli** : `openai/gpt-oss-20b` (`FINAL_MODEL`, quota séparé du 120b)
+- **Vision (écran, webcam)** : `qwen/qwen3.8-27b` avec `reasoning_effort="none"`
+- gpt-oss préfixe parfois les noms d'outils ("tool.get_system_info") :
+  `resolve_tool_name` (tools/__init__.py) les corrige
+
+## Pipeline d'un message (tools/tool_router.py, instant.py, memory_context.py)
+1. **Réponse instantanée** (instant.py) : heure, date, calcul → 0 appel IA.
+   Une durée ("dans 45 jours", "à 8 heures") n'est PAS une demande d'heure.
+2. **Mémoire** (memory_context.py) : "tu te souviens…", "qu'est-ce qu'on avait
+   dit sur…" → résumé sourcé de l'historique (réponse directe) ou injection
+   dans le prompt pour une demande mixte.
+3. **Routeur partagé** (tool_router.py), sans appel IA :
+   - conversation pure (le message entier est une salutation/remerciement) → 0 outil
+   - intentions précises de router_v03 → outils prioritaires
+   - mots-clés par catégorie + extension des chemins (.xlsx → Excel…)
+   - rien de reconnu → lot de 10 outils de lecture (jamais 0 outil : sans
+     outil, gpt-oss répond à vide ou invente des noms d'outils)
+   - au plus 12 outils, 8 en moyenne
+   - Mesuré : 100 % sur 40 phrases d'audit et 55 phrases nouvelles (V0.4 : 15-20 %)
+   - Tester sur des phrases DIFFÉRENTES des mots-clés : les anciens benchmarks
+     reprenaient les phrases des motifs et mesuraient la mémorisation
 
 ## Les 99 outils
 ### Fichiers — tools/files.py (12)
@@ -146,14 +193,18 @@ create_word, create_txt, create_pdf, read_document
 web_search (DuckDuckGo + cache LRU 10min), read_webpage
 
 ### Système — tools/system.py (4)
-get_system_info, open_file, run_command (PowerShell sécurisé), kill_process
+get_system_info, open_file, run_command (PowerShell filtré par expressions
+régulières + confirmation), kill_process
 
 ### Mémoire — tools/memory.py (3)
 save_memory(content, category), get_memories(category), delete_memory(memory_id)
+get_memories cherche aussi dans le contenu (le modèle passe souvent un sujet au
+lieu d'une catégorie) et masque les résumés internes `conversation_summary`.
 
 ### Email — tools/email_tool.py (4)
 read_emails(n), send_email(to, subject, body), search_emails(query), draft_email(to, subject, body)
 Auth : SMTP/IMAP + mot de passe application. Tri par date UTC + priorité emails perso.
+Lecture en BODY.PEEK[] : ne marque pas les emails comme lus.
 
 ### Navigateur — tools/browser.py (7)
 open_browser(url), click_element(selector), fill_form(selector, value),
@@ -189,7 +240,9 @@ get_weather(location), get_weather_simple(location)
 
 ### Traduction — tools/translator.py (2)
 translate(text, to_lang), detect_language(text)
-Textes longs decoupes automatiquement en morceaux de 4500 caracteres (limite GoogleTranslator ~5000)
+Google Traduction d'abord ; si Google refuse ("too many requests", fréquent),
+repli sur gpt-oss-20b et Google mis en pause 10 min. detect_language passe par
+le modèle. Textes longs découpés en morceaux de 4500 caractères.
 
 ### QR Code — tools/qrcode_tool.py (1)
 create_qrcode(text, output, size)
@@ -203,6 +256,7 @@ delete_task(name), run_task_now(name)
 
 ### Statistiques — tools/stats.py (2)
 get_stats(days), reset_stats()
+Chaque outil exécuté est enregistré automatiquement par tools/__init__.py.
 
 ### Mises à jour — tools/updater.py (2)
 check_update(), get_current_version()
@@ -214,7 +268,7 @@ get_license_info()
 set_volume, get_audio_level, mute_audio, set_brightness, get_brightness, wifi_toggle
 
 ### Vision écran — tools/screen_vision.py (1)
-analyze_screen (Groq vision : meta-llama/llama-4-scout-17b-16e-instruct)
+analyze_screen (Groq vision : qwen/qwen3.8-27b)
 
 ### YouTube et musique — tools/youtube_tool.py (3)
 open_youtube, search_youtube, play_music
@@ -227,41 +281,53 @@ search_flights (DuckDuckGo + Google Flights)
 
 ### Planification IA — tools/planner.py (2)
 create_plan (génère un plan JSON multi-étapes), execute_plan (génère ET exécute
-chaque étape, retry via Groq sur échec, confirmation avant action sensible)
+chaque étape, retry via Groq sur échec). Chaque étape sensible passe par le
+garde-fou central (tools/guard.py), comme un appel direct.
 
 ### Jeux — tools/games.py (6)
 open_steam, open_epic_games, list_installed_steam_games,
 launch_game_steam, search_game_on_steam, install_game_steam
 
 ### Vision webcam — tools/webcam_vision.py (1)
-analyze_webcam (capture + analyse Groq vision, aperçu live "EN DIRECT")
+analyze_webcam (capture + analyse Groq vision qwen3.8-27b, aperçu live "EN DIRECT")
 
 ### Confidentialité webcam — tools/webcam_guard.py (2)
 start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 
 ## Architecture mémoire (amah_memory.db)
 - Table conversations : historique auto de chaque échange (session_id, role, content)
-- Table memories : infos mémorisées explicitement (category, content)
-- Table tool_usage : statistiques d'utilisation des outils
+- Table memories : infos mémorisées explicitement (category, content) + résumés
+  mis en cache par le rappel de mémoire (category = conversation_summary)
+- Table tool_usage : statistiques d'utilisation des outils (alimentée automatiquement)
 - Au démarrage : 10 derniers messages rechargés automatiquement
 - Trimming contexte API : [system] + 40 derniers messages max
 - Troncature tool_results : 2000 chars en mémoire vive, 800 chars en DB
 
-## Optimisations tokens (v1.3)
-- Descriptions outils compactes : 16 914 chars (~4 228 tokens)
-- Routeur d'intention : 90+ mots-clés → 8-12 outils ciblés par appel
-- DEFAULT_TOOLS (12 outils) si aucun mot-clé détecté
-- Tokens/appel typique : ~1 500 (vs ~13 000 avant)
-- Appels/jour avec 3 clés : ~200
+## Coût en tokens
+- Prompt système + profil : ~3 700 tokens par appel (le poste le plus lourd)
+- Définitions d'outils : ~45 tokens par outil, 8 en moyenne par appel
+- agent.py reformule les résultats d'outils avec un prompt court
+  (RESPONSE_SYSTEM_PROMPT, config.py) sur gpt-oss-20b
+- Piste d'économie principale : raccourcir system_prompt.txt / user_profile.txt
 
 ## Interfaces disponibles
-### Terminal (agent.py)
+### Terminal (agent.py) — usage développeur
 - Lance avec : py -3.13 agent.py
-- Affiche les appels d'outils en temps réel
+- Affiche les appels d'outils et les diagnostics [ROUTER] / [MEMORY] / [PERF]
+- Ordre de traitement : mémoire (si AMAH_MEMORY_V024=1) → heure/date →
+  contexte (objectif, budget) → commande explicite ("exécute la commande …"
+  ou commande reconnue comme ipconfig / Get-Process) → Capability Bridge
+  (écran) → recherche approfondie (planner_v06) → FastPath → comparaison de
+  produits (planner_v04) → routeur partagé → IA + outils → reformulation 20b
+- Un seul tour d'outils par message : "fais X puis Y" n'exécute que X
+- Confirmation des actions sensibles par question dans le terminal
 
-### Fenêtre graphique (gui.py)
+### Fenêtre graphique (gui.py) — interface clients
 - Lance avec : py -3.13 gui.py
 - Écran de configuration premier lancement (3 clés Groq + licence + Gmail)
+- Réponses instantanées, rappel de mémoire, routeur partagé, boucle d'outils
+  multi-étapes, conversation pure en streaming sur gpt-oss-20b
+- Fenêtre "Oui / Non" avant toute action sensible
 - Horodatage, outils affichés après réponse, barre état, multi-ligne
 - Monitoring CPU/RAM temps réel, machine à écrire, bouton [+] pièce jointe
 - Bouton "⬡ Amah écoute" dans l'en-tête
@@ -269,6 +335,8 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 ### Interface vocale plein écran (voice_fullscreen.py)
 - HUD futuriste (hexagone cyan animé, radar, barres audio)
 - Boucle écoute → réponse → synthèse vocale entièrement automatique
+- Réponses instantanées + routeur partagé + 3 outils locaux (mode Live,
+  aperçu webcam, champ texte) ; conversation pure sur gpt-oss-20b
 - F11 : plein écran/fenêtré, Échap ou "ferme" : quitter
 
 ### Mot de réveil "Amah" (amah_listener.py)
@@ -295,13 +363,33 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 
 ## Distribution clients
 Le dossier dist/ contient tout ce qu'il faut livrer :
-- Amah Agent.exe (125 Mo, standalone, 65 outils, v1.3.0)
+- Amah Agent.exe (dernier build : 125 Mo, 65 outils, v1.3.0 — à recompiler en
+  v1.5.2 : l'ancien .exe utilise les modèles Llama retirés par Groq)
 - .env (Gmail pré-configuré, Groq + Licence à renseigner)
 - installer_navigateur.bat (Chromium, une seule fois)
 - GUIDE_INSTALLATION.md (guide complet)
 
 ## Sécurité
-- run_command bloque : rm -rf, invoke-expression, wget, & && || ` $(
+- **Garde-fou central (tools/guard.py)** : chaque outil de TOOL_FUNCTIONS y
+  passe, quelle que soit l'interface (gui, voix, mode Live, terminal,
+  execute_plan). Demande l'accord pour : run_command, run_code, delete_file,
+  move_file, organize_folder, edit_file, edit_pdf, kill_process, wifi_toggle,
+  send_email, install_game_steam, tâches planifiées, delete_memory,
+  reset_stats, start_auto_mute ; write_file seulement s'il écrase un fichier
+  existant ; open_file seulement sur un exécutable (.exe, .bat, .ps1, .py…).
+  Chaque interface enregistre son gestionnaire (set_confirm_handler) :
+  fenêtre Oui/Non (tk_confirm_handler) dans gui.py et voice_fullscreen.py,
+  question dans agent.py. **Sans gestionnaire enregistré, l'action est refusée.**
+  Une fonction appelée directement depuis son module (ex. send_email du
+  rapport de crash) ne passe pas par le garde-fou.
+- run_command (tools/system.py) : filtre par expressions régulières sur les
+  commandes ET leurs alias, indépendant de l'ordre des arguments (suppression,
+  formatage, extinction, téléchargement, code dynamique, shells imbriqués,
+  registre, comptes, services…). 22/22 commandes dangereuses testées bloquées,
+  20/20 commandes courantes acceptées (dont Get-Date -Format). Une commande
+  bloquée n'est pas soumise à confirmation.
+- Ne jamais mettre de jeton dans l'URL du remote git : Git Credential Manager
+  est configuré (credential.helper = manager)
 - Clé API dans .env (jamais dans le code ni dans le .exe)
 - Mot de passe Gmail dans .env
 - .env.example sans vraies credentials
@@ -442,7 +530,37 @@ Le dossier dist/ contient tout ce qu'il faut livrer :
   manquantes, utilisées respectivement par tools/voice.py et le mode
   LiteLLM de groq_client.py).
 
+## Etat — v1.5.2 (14/10/2026, audit complet + corrections)
+Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
+- [x] **Modèles** : passage à gpt-oss-120b / gpt-oss-20b et qwen3.8-27b
+  (Llama 3.3, Llama 3.1 et llama-4-scout retirés par Groq)
+- [x] **Vitesse** : requêtes avec outils de 27-71 s à 2-8 s (rotation immédiate
+  des clés sur 429, prompt court pour la reformulation, sonde LiteLLM)
+- [x] **Sécurité** : garde-fou central tools/guard.py + filtre run_command
+  réécrit (gui.py n'avait aucune confirmation réelle)
+- [x] **read_emails** réparé (renvoyait 0 email depuis la v1.4.2, commit e9ea55a)
+- [x] **Routeur partagé** tools/tool_router.py pour les 3 interfaces : 100 %
+  sur 95 phrases de test (V0.4 : 15-20 %, ancien routeur gui.py : 80-85 %)
+- [x] **gui.py** : réponses instantanées et rappel de mémoire V0.2.4
+  (tools/instant.py, tools/memory_context.py, partagés avec agent.py)
+- [x] **agent.py** : "je veux…", "lance X", "analyse le fichier…", "compare…",
+  "capture d'écran", "dans 45 jours" ne sont plus détournés ;
+  32/37 scénarios réussis (11/37 avant)
+- [x] Noms d'outils gpt-oss corrigés, statistiques alimentées, version unique
+  1.5.2, traduction de repli par IA, Excel/Word/PDF lisibles par read_file
+- [x] Bug gui.py corrigé : toute erreur Groq s'affichait en "cannot access
+  local variable 'repair_tool_use_failed'" (import local, depuis 9fe1cc1)
+- [ ] Refaire la série complète de scénarios gui.py (interrompue par le quota
+  journalier Groq le 14/10)
+- [ ] Rangement (étape 4) : benchmarks dans benchmarks/, archiver sauvegardes et
+  ~30 tools/*_v0x inutilisés, recompiler le .exe v1.5.2
+
 ## Prochaines améliorations possibles
+- [ ] Raccourcir le prompt système (~3 700 tokens/appel) : principal levier
+  pour dépasser ~40 demandes avec outils par clé et par jour
+- [ ] agent.py : enchaîner plusieurs outils ("fais X puis Y") comme gui.py
+- [ ] Recherche web plus fiable (DuckDuckGo limite les requêtes, résultats peu pertinents)
+- [ ] Synthèse vocale plus rapide (~8 s pour une phrase courte : démarrage PowerShell)
 - [ ] Licence entreprise volume (une clé pour N postes)
 - [ ] Google Calendar (agenda)
 - [ ] Dashboard journalier automatique

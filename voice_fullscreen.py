@@ -19,6 +19,8 @@ load_dotenv(_env)
 from tools.voice import speak
 from tools import TOOL_FUNCTIONS
 from tools.updater import CURRENT_VERSION
+from tools.tool_router import select_tools
+from tools.instant import instant_reply
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from groq_client import GroqClient, repair_tool_use_failed
@@ -86,73 +88,7 @@ STOP_WORDS = {
 MODEL_FAST  = "openai/gpt-oss-20b"       # questions simples sans outils (~300ms)
 MODEL_FULL  = "openai/gpt-oss-120b"      # requêtes avec outils (~1-2s)
 
-# ── Routeur d'outils (même logique que gui.py) ───────────────────────────────
-
-_DEFAULT_TOOLS = {
-    "web_search","read_webpage","list_files","read_file",
-    "open_file","run_command","get_system_info","speak",
-    "get_weather_simple","translate","get_datetime","calculate",
-}
-
-_WORD_TO_CAT = {
-    "projet":"memoire","projets":"memoire","tache":"memoire","taches":"memoire",
-    "rappelle":"memoire","souviens":"memoire",
-    "liste":"fichiers","lister":"fichiers","fichier":"fichiers","fichiers":"fichiers",
-    "dossier":"fichiers","trouve":"fichiers","trouver":"fichiers","deplace":"fichiers",
-    "organise":"fichiers","classe":"fichiers","lis":"fichiers","lire":"fichiers",
-    "affiche":"fichiers","montre":"fichiers","modifie":"fichiers","modifier":"fichiers",
-    "ecris":"fichiers","ecrire":"fichiers","remplace":"fichiers","corrige":"fichiers",
-    "html":"fichiers","css":"fichiers","js":"fichiers","py":"fichiers","json":"fichiers",
-    "word":"documents","pdf":"documents","txt":"documents","document":"documents",
-    "rapport":"documents","cree":"documents","creer":"documents","genere":"documents",
-    "redige":"documents","lettre":"documents","facture":"documents","contrat":"documents",
-    "web":"internet","recherche":"internet","site":"internet","cherche":"internet",
-    "url":"internet","clique":"internet","screenshot":"internet","page":"internet",
-    "youtube":"youtube","video":"youtube","musique":"youtube","chanson":"youtube",
-    "email":"email","mail":"email","envoie":"email","lis-mes":"email","gmail":"email",
-    "memorise":"memoire","souviens":"memoire","rappelle":"memoire","oublie":"memoire",
-    "systeme":"systeme","processus":"systeme","reseau":"systeme","ip":"systeme",
-    "commande":"systeme","ram":"systeme","cpu":"systeme","disque":"systeme","pc":"systeme",
-    "calcule":"utils","convertis":"utils","date":"utils","heure":"utils","zip":"utils",
-    "excel":"data","tableau":"data","clipboard":"data","presse-papiers":"data",
-    "parle":"media","dis":"media","voix":"media","notification":"media","rappel":"media",
-    "image":"images","photo":"images","redimensionne":"images","png":"images","jpg":"images",
-    "meteo":"info","temps":"info","traduis":"info","traduction":"info","langue":"info",
-    "volume":"hardware","son":"hardware","muet":"hardware","luminosite":"hardware",
-    "wifi":"hardware","lumiere":"hardware","sombre":"hardware",
-    "vois":"vision","observe":"vision","ecran":"vision","analyse":"vision",
-    "mon-ecran":"vision","sur-ecran":"vision","l-ecran":"vision","regarde":"vision",
-    "lire-ecran":"vision","lis-ecran":"vision","que-vois":"vision","ecrat":"vision",
-    "carte":"internet","cartes":"internet","drapeau":"internet","drapeaux":"internet",
-    "vol":"flights","vols":"flights","avion":"flights","billet":"flights","voyage":"flights",
-    "plan":"planner","etapes":"planner","sequence":"planner",
-    "steam":"jeux","epic":"jeux","jeu":"jeux","jeux":"jeux",
-    "webcam":"webcam","camera":"webcam","cam":"webcam","auto-mute":"webcam","automute":"webcam",
-}
-
-_CAT_TOOLS = {
-    "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
-    "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf"},
-    "internet":  {"web_search","read_webpage","open_browser","click_element","fill_form","take_screenshot","get_page_text","click_text","type_in_field"},
-    "email":     {"read_emails","send_email","search_emails","draft_email"},
-    "memoire":   {"save_memory","get_memories","delete_memory"},
-    "systeme":   {"get_system_info","open_file","run_command","list_processes","get_network_info","kill_process"},
-    "utils":     {"calculate","get_datetime","add_days","generate_password","convert_units","zip_files","unzip_file","list_archive"},
-    "data":      {"read_excel","create_excel","append_to_excel","read_clipboard","write_clipboard"},
-    "media":     {"speak","listen","send_notification","set_reminder","screenshot_full"},
-    "images":    {"screenshot_full","resize_image","get_image_info","convert_image"},
-    "info":      {"get_weather","get_weather_simple","translate","detect_language","get_stats","check_update"},
-    "hardware":  {"set_volume","get_audio_level","mute_audio","set_brightness","get_brightness","wifi_toggle"},
-    "vision":    {"analyze_screen","screenshot_full"},
-    "youtube":   {"open_youtube","search_youtube","open_browser","web_search","play_music"},
-    "flights":   {"search_flights","web_search","open_browser"},
-    "planner":   {"create_plan","execute_plan"},
-    "planif":    {"create_daily_task","list_tasks","delete_task","run_task_now"},
-    "code":      {"write_code","run_code","explain_code"},
-    "jeux":      {"open_steam","open_epic_games","list_installed_steam_games",
-                   "launch_game_steam","search_game_on_steam","install_game_steam"},
-    "webcam":    {"analyze_webcam","start_auto_mute","stop_auto_mute"},
-}
+# ── Routeur d'outils : tools/tool_router.py (partagé avec gui.py et agent.py) ──
 
 # Outil local (hors TOOLS_DEFINITIONS) : bascule du Mode Live Gemini, gere
 # directement par cette interface (F9). Ajoute a chaque appel pour qu'Amah
@@ -222,22 +158,12 @@ _TEXT_ENTRY_TOOL = {
 }
 
 def _select_tools(message: str):
-    import unicodedata
-    nfd   = unicodedata.normalize("NFD", message.lower().replace("'", " "))
-    clean = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
-    words = clean.split()
-    cats  = {_WORD_TO_CAT[w] for w in words if w in _WORD_TO_CAT}
-    if not cats:
-        needed = _DEFAULT_TOOLS
-    else:
-        needed = set()
-        for cat in cats:
-            needed |= _CAT_TOOLS.get(cat, set())
-    tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in needed]
-    tools.append(_LIVE_TOOL)
-    tools.append(_WEBCAM_PREVIEW_TOOL)
-    tools.append(_TEXT_ENTRY_TOOL)
-    return tools
+    """Outils du routeur partagé + outils locaux de l'interface vocale.
+    Conversation pure -> [] : réponse rapide par MODEL_FAST, sans outil."""
+    tools, _info = select_tools(message, TOOLS_DEFINITIONS)
+    if not tools:
+        return []
+    return tools + [_LIVE_TOOL, _WEBCAM_PREVIEW_TOOL, _TEXT_ENTRY_TOOL]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -853,6 +779,12 @@ class AmahVoiceUI:
         self.messages.append({"role": "user", "content": text})
         if len(self.messages) > 22:
             self.messages = [self.messages[0]] + self.messages[-20:]
+
+        # Heure, date, calcul simple : réponse immédiate sans appel IA
+        instant = instant_reply(text)
+        if instant:
+            self.messages.append({"role": "assistant", "content": instant})
+            return instant, False
 
         tools = _select_tools(text)
         model = MODEL_FULL if tools else MODEL_FAST

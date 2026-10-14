@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, List, Optional
 
 from tools.planner_v04 import PlannerPlan, PlannerStep
@@ -105,25 +106,55 @@ def _build_steps(subject: str, user_text: str) -> List[PlannerStep]:
     ]
 
 
+def _generic_subject(user_text: str) -> str:
+    """Sujet d'une demande hors téléphones : "un dossier sur l'énergie solaire"."""
+    match = re.search(
+        r"\b(?:sur|concernant|à propos de|a propos de)\s+(.+)$",
+        str(user_text or ""),
+        flags=re.IGNORECASE,
+    )
+    return _clean(match.group(1)) if match else ""
+
+
+def _build_generic_steps(subject: str) -> List[PlannerStep]:
+    year = datetime.now().year
+    queries = [
+        ("search_overview", subject, "obtenir une vue d'ensemble fiable du sujet"),
+        ("search_facts", f"{subject} chiffres clés données", "recueillir des faits et chiffres vérifiables"),
+        ("search_news", f"{subject} actualité {year}", "trouver les informations récentes"),
+    ]
+    return [
+        PlannerStep(
+            step_id=step_id,
+            action="search",
+            tool_name="web_search",
+            args={"query": _clean(query), "num_results": 5},
+            purpose=purpose,
+        )
+        for step_id, query, purpose in queries
+    ]
+
+
 def build_deep_research_plan(user_text: str, context: Any = None) -> Optional[PlannerPlan]:
     if not is_deep_research_request(user_text):
         return None
     subject = _extract_subject(user_text, context)
-    if not subject:
-        return PlannerPlan(
-            kind="clarification",
-            objective="recherche approfondie",
-            clarification="Sur quel sujet veux-tu que je fasse la recherche approfondie ?",
-            requires_synthesis=False,
-            version="0.6",
-        )
+    if subject:
+        steps = _build_steps(subject, user_text)
+    else:
+        # Sujet hors téléphones : recherches génériques (avant, la demande
+        # recevait "Sur quel sujet… ?" alors que le sujet était donné).
+        subject = _generic_subject(user_text)
+        if not subject:
+            return None
+        steps = _build_generic_steps(subject)
     return PlannerPlan(
         kind="deep_research",
         objective=f"collecter les informations importantes et vérifiables sur {subject}",
         tools=["web_search"],
         constraints={},
         models=[subject],
-        steps=_build_steps(subject, user_text),
+        steps=steps,
         requires_synthesis=True,
         version="0.6",
     )

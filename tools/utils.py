@@ -119,10 +119,32 @@ _CONVERSIONS = {
     ("fl oz", "ml"):   29.5735,
 }
 
+# Noms d'unités écrits par le modèle ou l'utilisateur -> clé de _CONVERSIONS
+# ("mile"/"kilometer" faisaient échouer la conversion miles -> km).
+_UNIT_ALIASES = {
+    "mile": "miles", "mi": "miles",
+    "kilometer": "km", "kilometers": "km", "kilometre": "km", "kilometres": "km",
+    "kilomètre": "km", "kilomètres": "km",
+    "meter": "m", "meters": "m", "metre": "m", "metres": "m", "mètre": "m", "mètres": "m",
+    "foot": "ft", "feet": "ft", "pied": "ft", "pieds": "ft",
+    "centimeter": "cm", "centimeters": "cm", "centimetre": "cm", "centimètre": "cm", "centimètres": "cm",
+    "inch": "in", "inches": "in", "pouce": "in", "pouces": "in",
+    "kilogram": "kg", "kilograms": "kg", "kilogramme": "kg", "kilogrammes": "kg", "kilo": "kg", "kilos": "kg",
+    "lb": "lbs", "pound": "lbs", "pounds": "lbs", "livre": "lbs", "livres": "lbs",
+    "gram": "g", "grams": "g", "gramme": "g", "grammes": "g",
+    "ounce": "oz", "ounces": "oz", "once": "oz", "onces": "oz",
+    "liter": "l", "liters": "l", "litre": "l", "litres": "l",
+    "gallon": "gal", "gallons": "gal",
+    "c": "celsius", "°c": "celsius", "f": "fahrenheit", "°f": "fahrenheit", "k": "kelvin",
+}
+
+
 def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
     """Convertit une valeur d'une unité à une autre."""
     try:
         fu, tu = from_unit.lower().strip(), to_unit.lower().strip()
+        fu, tu = _UNIT_ALIASES.get(fu, fu), _UNIT_ALIASES.get(tu, tu)
+        value = float(value)
 
         # Température
         if fu == "celsius" and tu in ("fahrenheit", "f"):
@@ -144,7 +166,7 @@ def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
             "de":         from_unit,
             "vers":       to_unit,
             "resultat":   round(result, 4),
-            "formatte":   f"{value} {from_unit} = {round(result, 4)} {to_unit}",
+            "formatte":   f"{value:g} {from_unit} = {round(result, 4):g} {to_unit}",
         }
     except Exception as e:
         return {"error": str(e)}
