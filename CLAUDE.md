@@ -21,7 +21,8 @@ amah-agent/
 ├── gemini_client.py          ← Session Gemini Live (audio temps réel + function calling)
 ├── config.py                 ← Modèles (MODEL, FINAL_MODEL), prompts, 99 définitions outils
 ├── system_prompt.txt         ← Texte du prompt système (~3 700 tokens avec le profil)
-├── user_profile.txt          ← Profil utilisateur ajouté au prompt système
+├── user_profile.txt          ← Profil personnel ajouté au prompt système (gitignoré,
+│                                 jamais publié ; modèle : user_profile.example.txt)
 ├── create_shortcut.py        ← Crée le raccourci .lnk sur le bureau
 ├── amah_memory.db            ← Base SQLite mémoire persistante (auto-créée)
 ├── amah.spec                 ← Spec PyInstaller pour le packaging .exe

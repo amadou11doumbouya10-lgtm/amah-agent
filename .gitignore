@@ -9,6 +9,10 @@ ghp_*
 # Base de données locale
 amah_memory.db
 
+# Profil personnel (nom, emails, projets privés) : chaque utilisateur a le
+# sien, jamais publié. Modèle à copier : user_profile.example.txt
+user_profile.txt
+
 # Build PyInstaller
 dist/
 build/

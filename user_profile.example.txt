@@ -1,0 +1,23 @@
+# PROFIL UTILISATEUR — Amah Agent (modèle)
+# Copie ce fichier en "user_profile.txt" (même dossier que config.py) et
+# remplis-le : Amah l'ajoute à son prompt système au démarrage pour mieux te
+# connaître. Facultatif : sans ce fichier, Amah fonctionne normalement.
+# Les lignes commençant par # sont ignorées.
+# user_profile.txt n'est jamais publié (voir .gitignore). N'y mets ni mot de
+# passe ni clé API : ils vont dans .env.
+# Chaque ligne est renvoyée à l'IA à chaque message : reste bref (quota Groq).
+
+[IDENTITE]
+Prenom :
+Nom :
+Email :
+
+[METIER ET PROJETS]
+Metier :
+Projet principal :
+
+[PREFERENCES DE TRAVAIL]
+Langue : francais
+Style de reponse : direct et efficace
+
+[AUTRES INFORMATIONS UTILES]
