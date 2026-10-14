@@ -21,7 +21,7 @@ from config import (
     TOOLS_DEFINITIONS,
 )
 from groq_client import GroqClient, repair_tool_use_failed
-from tools import TOOL_FUNCTIONS
+from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.guard import set_confirm_handler
 from tools.router_v04 import route_tools, is_simple_chat, normalize_for_router
 from tools.fastpath_v01 import detect_fastpath
@@ -895,6 +895,7 @@ def _execute_tool_by_name(
 ) -> str:
     """Exécute directement un outil avec un contrôle Security V0.2."""
     args = args or {}
+    name = resolve_tool_name(name)  # "tool.get_system_info" -> "get_system_info"
 
     authorization = authorize_tool(name=name, args=args, source=source)
     if PERF_LOG:

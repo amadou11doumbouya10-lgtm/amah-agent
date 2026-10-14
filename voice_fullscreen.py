@@ -18,6 +18,7 @@ _env = (Path(sys.executable).parent / ".env"
 load_dotenv(_env)
 from tools.voice import speak
 from tools import TOOL_FUNCTIONS
+from tools.updater import CURRENT_VERSION
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from groq_client import GroqClient, repair_tool_use_failed
@@ -555,7 +556,7 @@ class AmahVoiceUI:
         self._draw_corners(c, W, H, color)
 
         # ── En-tête ───────────────────────────────────────────────────────
-        c.create_text(40, 28, text="AMAH  AGENT  v1.5.1",
+        c.create_text(40, 28, text=f"AMAH  AGENT  v{CURRENT_VERSION}",
                       fill=color, font=("Consolas", 11, "bold"), anchor="nw")
         c.create_text(40, 48, text="INTERFACE VOCALE  ·  GROQ AI",
                       fill=_blend(BG, color, 0.45),

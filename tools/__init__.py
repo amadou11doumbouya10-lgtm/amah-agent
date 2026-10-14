@@ -1,3 +1,4 @@
+import functools
 import importlib
 
 # Source unique de TOOL_FUNCTIONS : chaque entrée associe un module à la liste
@@ -52,11 +53,56 @@ _TOOL_MODULES = [
 ]
 
 from tools.guard import guarded
+from tools.stats import record_tool_use
+
+
+class _ToolRegistry(dict):
+    """dict des outils dont get() / in / [] acceptent les noms déformés par gpt-oss."""
+
+    def get(self, key, default=None):
+        return dict.get(self, resolve_tool_name(key), default)
+
+    def __contains__(self, key):
+        return dict.__contains__(self, resolve_tool_name(key))
+
+    def __getitem__(self, key):
+        return dict.__getitem__(self, resolve_tool_name(key))
+
+
+def resolve_tool_name(name) -> str:
+    """Retrouve le vrai nom d'un outil appelé par le modèle.
+
+    gpt-oss préfixe parfois le nom par un espace de noms de son entraînement
+    ("tool.get_system_info", "functions.read_file") ou y colle un marqueur
+    ("get_weather<|channel|>commentary") : l'appel échouait en "outil inconnu".
+    """
+    raw = str(name or "").strip()
+    clean = raw.split("<|", 1)[0].strip()
+    if dict.__contains__(TOOL_FUNCTIONS, clean):
+        return clean
+    if "." in clean:
+        suffix = clean.rsplit(".", 1)[1]
+        if dict.__contains__(TOOL_FUNCTIONS, suffix):
+            return suffix
+    return raw
+
+
+def _counted(name, func):
+    """Enregistre chaque exécution réelle pour get_stats."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        record_tool_use(name)
+        return func(*args, **kwargs)
+    return wrapper
+
 
 # Chaque outil passe par le garde-fou central (tools/guard.py) : les actions
 # sensibles demandent l'accord de l'utilisateur quelle que soit l'interface.
-TOOL_FUNCTIONS = {}
+# Le comptage est à l'intérieur : une action refusée n'est pas comptée.
+TOOL_FUNCTIONS = _ToolRegistry()
 for _module_name, _tool_names in _TOOL_MODULES:
     _module = importlib.import_module(_module_name)
     for _tool_name in _tool_names:
-        TOOL_FUNCTIONS[_tool_name] = guarded(_tool_name, getattr(_module, _tool_name))
+        TOOL_FUNCTIONS[_tool_name] = guarded(
+            _tool_name, _counted(_tool_name, getattr(_module, _tool_name))
+        )

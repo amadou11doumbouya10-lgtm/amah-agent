@@ -14,7 +14,8 @@ from groq_client import GroqClient, repair_tool_use_failed
 from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
-from tools import TOOL_FUNCTIONS
+from tools import TOOL_FUNCTIONS, resolve_tool_name
+from tools.updater import CURRENT_VERSION
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
 from webcam_monitor import WebcamMonitor
@@ -364,7 +365,7 @@ class AmahGUI:
                  bg=BG2, fg=_backend_color, font=("Consolas", 8, "bold"))
         self._backend_lbl.pack(side=tk.RIGHT, padx=(0, 6))
 
-        tk.Label(sb, text="Shift+Entrée = newline  ·  Ctrl+R = reset  ·  99 outils  ·  v1.5",
+        tk.Label(sb, text=f"Shift+Entrée = newline  ·  Ctrl+R = reset  ·  {len(TOOL_FUNCTIONS)} outils  ·  v{CURRENT_VERSION}",
                  bg=BG2, fg=TEXT3, font=("Consolas", 8), anchor="e"
                  ).pack(side=tk.RIGHT, padx=14)
 
@@ -950,7 +951,7 @@ class AmahGUI:
             "Webcam":      ["analyze_webcam","start_auto_mute","stop_auto_mute"],
             "Planif":      ["create_plan","execute_plan","create_daily_task","list_tasks","delete_task","run_task_now"],
         }
-        self._write(("\n  — 99 outils disponibles —\n\n", "dim"))
+        self._write((f"\n  — {len(TOOL_FUNCTIONS)} outils disponibles —\n\n", "dim"))
         for cat, tools in cats.items():
             self._write((f"  {cat}: ", "amah_lbl"),
                         (" · ".join(tools) + "\n", "dim"))
@@ -979,7 +980,7 @@ class AmahGUI:
         return self._groq_call(self.messages, tools=TOOLS_DEFINITIONS, model_override=MODEL)
 
     def _execute_tool(self, tool_call) -> str:
-        name = tool_call.function.name
+        name = resolve_tool_name(tool_call.function.name)
         try:
             args = json.loads(tool_call.function.arguments) or {}
         except Exception:
@@ -1229,6 +1230,13 @@ class AmahGUI:
     }
 
     # Catégories → noms d'outils inclus
+    _EXT_TO_CAT = {
+        ".xlsx": "data", ".xlsm": "data", ".csv": "data",
+        ".docx": "documents", ".pdf": "documents", ".txt": "documents", ".md": "documents",
+        ".py": "code", ".js": "code", ".html": "code", ".css": "code", ".json": "code",
+        ".png": "images", ".jpg": "images", ".jpeg": "images", ".webp": "images",
+    }
+
     _CAT_TOOLS = {
         "fichiers":  {"list_files","organize_folder","find_files","move_file","create_folder","read_file","write_file","edit_file","edit_pdf","get_folder_info","delete_file","summarize"},
         "documents": {"create_word","create_txt","create_pdf","read_document","write_file","edit_file","edit_pdf","summarize"},
@@ -1266,6 +1274,11 @@ class AmahGUI:
             cat = self._WORD_TO_CAT.get(w)
             if cat:
                 cats.add(cat)
+            # Un chemin ("C:/x/ventes.xlsx") forme un seul mot : son extension
+            # indique les bons outils (sinon read_excel n'etait jamais propose).
+            ext_cat = self._EXT_TO_CAT.get(os.path.splitext(w.rstrip(".,;:!?)"))[1])
+            if ext_cat:
+                cats.add(ext_cat)
         if not cats:
             return None
         needed = set()
@@ -1341,7 +1354,7 @@ class AmahGUI:
                 from groq_client import repair_tool_use_failed as _rtuf
                 _rep = _rtuf(e)
                 if _rep:
-                    _extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == _rep[0]]
+                    _extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == resolve_tool_name(_rep[0])]
                     tools = list(tools or []) + _extra
                 else:
                     tools = TOOLS_DEFINITIONS
@@ -1357,7 +1370,7 @@ class AmahGUI:
 
         # Si le modèle réclame un outil hors de la sous-liste → relancer avec tous (70B)
         if response.choices[0].finish_reason == "tool_calls":
-            tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
+            tool_names = {resolve_tool_name(tc.function.name) for tc in (response.choices[0].message.tool_calls or [])}
             available  = {t["function"]["name"] for t in (tools or [])}
             if not tool_names.issubset(available):
                 _missing = tool_names - available
@@ -1375,7 +1388,7 @@ class AmahGUI:
                 "content": msg.content or "",
                 "tool_calls": [
                     {"id": tc.id, "type": "function",
-                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                     "function": {"name": resolve_tool_name(tc.function.name), "arguments": tc.function.arguments}}
                     for tc in msg.tool_calls
                 ],
             }
@@ -1407,7 +1420,7 @@ class AmahGUI:
                     from groq_client import repair_tool_use_failed
                     repaired = repair_tool_use_failed(e)
                     if repaired:
-                        missing_name = repaired[0]
+                        missing_name = resolve_tool_name(repaired[0])
                         extra = [t for t in TOOLS_DEFINITIONS
                                  if t["function"]["name"] == missing_name]
                         tools = list(tools or []) + extra
@@ -1418,7 +1431,7 @@ class AmahGUI:
                 else:
                     raise
             if response.choices[0].finish_reason == "tool_calls":
-                tool_names = {tc.function.name for tc in (response.choices[0].message.tool_calls or [])}
+                tool_names = {resolve_tool_name(tc.function.name) for tc in (response.choices[0].message.tool_calls or [])}
                 available  = {t["function"]["name"] for t in (tools or [])}
                 if not tool_names.issubset(available):
                     # Ajoute uniquement les outils manquants au lieu des 99
@@ -1489,7 +1502,7 @@ class SetupWindow:
                  bg=BG_PANEL, fg=GOLD, font=("Consolas", 13, "bold")).pack()
         tk.Label(hdr, text="Configure tes acces pour demarrer",
                  bg=BG_PANEL, fg=TEXT_DIM, font=("Consolas", 9)).pack()
-        tk.Label(hdr, text="v1.5.0  ·  87 outils  ·  Windows 11",
+        tk.Label(hdr, text=f"v{CURRENT_VERSION}  ·  {len(TOOL_FUNCTIONS)} outils  ·  Windows 11",
                  bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
@@ -1704,7 +1717,7 @@ def _setup_crash_reporter():
     def _handler(exc_type, exc_value, exc_tb):
         try:
             tb   = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            body = f"CRASH AMAH AGENT\n\n{tb}\n\nVersion: 1.5.1\nDate: {datetime.now()}"
+            body = f"CRASH AMAH AGENT\n\n{tb}\n\nVersion: {CURRENT_VERSION}\nDate: {datetime.now()}"
             from tools.email_tool import send_email
             send_email("contact.amah.officiel@gmail.com", "Amah Agent — Crash rapport", body)
         except Exception:

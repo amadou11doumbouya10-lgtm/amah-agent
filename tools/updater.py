@@ -9,7 +9,9 @@ import subprocess
 import threading
 from pathlib import Path
 
-CURRENT_VERSION = "1.4.2"
+# Seule source de la version : affichée par gui.py / voice_fullscreen.py et
+# comparée à version.json pour les mises à jour. À changer à chaque build.
+CURRENT_VERSION = "1.5.2"
 
 # URL où tu héberges les infos de version — à mettre à jour avant distribution
 # Format du fichier JSON attendu :

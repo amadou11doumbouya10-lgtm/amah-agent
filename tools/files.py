@@ -150,12 +150,24 @@ def create_folder(path: str) -> dict:
         return {"error": str(e)}
 
 
+_EXCEL_EXT = (".xlsx", ".xlsm")
+
+
 def read_file(path: str) -> dict:
     p = Path(path).expanduser()
     if not p.exists():
         return {"error": f"Fichier introuvable : {path}"}
     if not p.is_file():
         return {"error": "Ce chemin est un dossier, pas un fichier."}
+
+    # Formats binaires : les lire en texte renvoyait des octets illisibles
+    ext = p.suffix.lower()
+    if ext in _EXCEL_EXT:
+        from tools.excel import read_excel
+        return read_excel(str(p))
+    if ext in (".docx", ".pdf"):
+        from tools.documents import read_document
+        return read_document(str(p))
 
     try:
         content = p.read_text(encoding="utf-8", errors="replace")
@@ -286,6 +298,15 @@ def summarize(path: str) -> dict:
                 text = "\n".join(para.text for para in d.paragraphs)
             except ImportError:
                 return {"error": "python-docx manquant. Lance : pip install python-docx"}
+        elif ext in _EXCEL_EXT:
+            from tools.excel import read_excel
+            data = read_excel(str(p))
+            if not data.get("success"):
+                return data
+            text = "\n\n".join(
+                f"Feuille {sheet} :\n" + "\n".join("\t".join(row) for row in rows)
+                for sheet, rows in data["feuilles"].items()
+            )
         else:
             text = p.read_text(encoding="utf-8", errors="replace")
 
