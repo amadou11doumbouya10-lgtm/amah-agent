@@ -91,6 +91,25 @@ def read_emails(n: int = 5) -> dict:
         # 3. Récupère en-têtes DATE + FROM + SUBJECT + LIST-UNSUBSCRIBE pour chaque candidat
         # LIST-UNSUBSCRIBE est présent dans TOUS les newsletters — absent dans les emails perso
         emails_with_date = []
+        for uid in candidate_uids:
+            _, hdr_data = conn.uid(
+                'FETCH', uid,
+                '(BODY.PEEK[HEADER.FIELDS (DATE FROM SUBJECT LIST-UNSUBSCRIBE)])'
+            )
+            if not hdr_data or not hdr_data[0] or not isinstance(hdr_data[0], tuple):
+                continue
+            hdr           = email.message_from_bytes(hdr_data[0][1])
+            date_str      = hdr.get('Date', '')
+            from_str      = _decode(hdr.get('From', ''))
+            subj_str      = _decode(hdr.get('Subject', ''))
+            is_newsletter = bool(hdr.get('List-Unsubscribe', ''))
+            try:
+                dt = parsedate_to_datetime(date_str)
+            except Exception:
+                dt = None
+            emails_with_date.append((uid, dt, date_str, from_str, subj_str, is_newsletter))
+
+        # 4. Trie par date décroissante
         emails_with_date.sort(
             key=lambda x: x[1].timestamp() if x[1] else 0,
             reverse=True
@@ -106,8 +125,9 @@ def read_emails(n: int = 5) -> dict:
         # 5. Télécharge le corps uniquement pour les N sélectionnés
         emails = []
         for uid, dt, date_str, de, sujet, _ in top_n:
-            _, msg_data = conn.uid('FETCH', uid, '(RFC822)')
-            if not msg_data or not msg_data[0]:
+            # BODY.PEEK[] : contrairement a RFC822, ne marque pas l'email comme lu
+            _, msg_data = conn.uid('FETCH', uid, '(BODY.PEEK[])')
+            if not msg_data or not msg_data[0] or not isinstance(msg_data[0], tuple):
                 # Fallback si le corps n'est pas dispo
                 emails.append({'de': de, 'sujet': sujet,
                                'date': date_str, 'extrait': '(corps non disponible)'})
@@ -166,7 +186,9 @@ def search_emails(query: str) -> dict:
 
         emails = []
         for uid in to_fetch:
-            _, msg_data = conn.fetch(uid, '(RFC822)')
+            _, msg_data = conn.fetch(uid, '(BODY.PEEK[])')  # ne marque pas comme lu
+            if not msg_data or not isinstance(msg_data[0], tuple):
+                continue
             msg = email.message_from_bytes(msg_data[0][1])
             emails.append({
                 'de':    _decode(msg.get('From', '')),

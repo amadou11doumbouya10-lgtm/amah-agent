@@ -1,24 +1,56 @@
 import os
+import re
 import subprocess
 import platform
 from pathlib import Path
 
-# Commandes autorisées — sécurité
-BLOCKED_KEYWORDS = [
-    "rm -rf", "del /f /s", "format", "rmdir /s", "shutdown",
-    "net user", "reg delete", "cipher", "diskpart",
-    "invoke-expression", "iex ", "downloadstring", "webclient",
-    "start-process", "invoke-webrequest", "curl -s", "wget ",
-    "remove-item -recurse", "remove-item -r", "rd /s",
+# Sécurité run_command : commandes refusées quel que soit l'ordre des arguments.
+# Les anciennes sous-chaînes ("remove-item -recurse", "format"...) laissaient
+# passer les alias (rm, ri, iwr, irm...) et "-Path X -Recurse", et bloquaient
+# à tort "Get-Date -Format". Les suppressions/kill/tâches ont leurs propres
+# outils (delete_file, kill_process, create_daily_task) soumis à confirmation.
+_W = r"(?<![\w-])"   # début de mot de commande (pas au milieu d'un nom ou d'une option)
+_E = r"(?![\w-])"    # fin de mot de commande
+BLOCKED_REGEX = [
+    (_W + r"(remove-item|ri|rm|rmdir|rd|del|erase|clear-content|clc|clear-recyclebin)" + _E,
+     "suppression de fichiers (utilise delete_file)"),
+    (_W + r"(format-volume|clear-disk|initialize-disk|diskpart|mkfs)" + _E + r"|" + _W + r"format\s+[a-z]:",
+     "formatage de disque"),
+    (_W + r"(stop-computer|restart-computer|shutdown|logoff)" + _E, "extinction ou redémarrage"),
+    (_W + r"(invoke-expression|iex|invoke-command|icm|add-type)" + _E + r"|scriptblock|-enc(odedcommand)?" + _E
+     + r"|frombase64string", "exécution de code dynamique"),
+    (_W + r"(invoke-webrequest|iwr|invoke-restmethod|irm|curl|wget|start-bitstransfer|bitsadmin|certutil)" + _E
+     + r"|downloadstring|downloadfile|net\.webclient", "téléchargement"),
+    (_W + r"(start-process|saps|start|invoke-item|ii|rundll32|mshta|wscript|cscript|regsvr32)" + _E,
+     "lancement de programme (utilise open_file)"),
+    (_W + r"(powershell|pwsh|cmd)(\.exe)?" + _E, "shell imbriqué"),
+    (_W + r"(stop-process|spps|kill|taskkill)" + _E, "arrêt de processus (utilise kill_process)"),
+    (_W + r"(set-mppreference|add-mppreference|set-executionpolicy|bcdedit|vssadmin|wbadmin|cipher|takeown|icacls)" + _E,
+     "sécurité du système"),
+    (_W + r"reg(\.exe)?\s+(delete|add|import)" + _E
+     + r"|" + _W + r"(remove-itemproperty|set-itemproperty|new-itemproperty)" + _E, "registre Windows"),
+    (_W + r"net(\.exe)?\s+(user|localgroup)" + _E + r"|netsh\s+advfirewall", "comptes ou pare-feu"),
+    (_W + r"(stop-service|set-service|remove-service|schtasks|register-scheduledtask|unregister-scheduledtask)" + _E
+     + r"|" + _W + r"sc(\.exe)?\s+(delete|stop|config)" + _E, "services ou tâches planifiées"),
 ]
 
-BLOCKED_PATTERNS = [
-    "&",   # chaining de commandes
-    "&&",
+BLOCKED_OPERATORS = [
+    "&",   # opérateur d'appel / enchaînement
     "||",
-    "`",   # backtick exécution
-    "$(", # sous-expression
+    "`",   # échappement PowerShell
+    "$(",  # sous-expression
 ]
+
+
+def _blocked_reason(command: str):
+    """Retourne la raison du blocage, ou None si la commande est acceptée."""
+    for pattern, reason in BLOCKED_REGEX:
+        if re.search(pattern, command, flags=re.IGNORECASE):
+            return reason
+    for operator in BLOCKED_OPERATORS:
+        if operator in command:
+            return f"caractère interdit « {operator} »"
+    return None
 
 
 def get_system_info() -> dict:
@@ -70,13 +102,9 @@ def open_file(path: str) -> dict:
 
 
 def run_command(command: str) -> dict:
-    cmd_lower = command.lower()
-    for blocked in BLOCKED_KEYWORDS:
-        if blocked in cmd_lower:
-            return {"error": f"Commande bloquee pour securite : contient '{blocked}'"}
-    for pattern in BLOCKED_PATTERNS:
-        if pattern in command:
-            return {"error": f"Caractere interdit dans la commande : '{pattern}'"}
+    reason = _blocked_reason(command)
+    if reason:
+        return {"error": f"Commande bloquée pour sécurité : {reason}."}
 
     try:
         result = subprocess.run(

@@ -23,5 +23,5 @@ PyQt6-sip
 sounddevice
 opencv-python-headless
 google-genai
-edge-tts
+edge-tts>=7.3.1
 openai

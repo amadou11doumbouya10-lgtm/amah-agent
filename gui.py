@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
 from tools import TOOL_FUNCTIONS
+from tools.guard import set_confirm_handler, tk_confirm_handler
 from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
 from webcam_monitor import WebcamMonitor
 
@@ -121,6 +122,8 @@ TOOL_LABELS = {
 class AmahGUI:
     def __init__(self, root):
         self.root       = root
+        # Actions sensibles (suppression, commande, envoi...) : boite Oui/Non
+        set_confirm_handler(tk_confirm_handler(self.root))
         self.root.title("The Amah — Agent Local")
         self.root.configure(bg=BG)
         self.root.geometry("980x700")
@@ -727,7 +730,7 @@ class AmahGUI:
         started = [False]
         try:
             stream = self.groq.chat(
-                self.messages, model="llama-3.1-8b-instant",
+                self.messages, model="openai/gpt-oss-20b",
                 max_tokens=1024, temperature=0.4, stream=True,
                 on_status=lambda txt: self.root.after(0, self._set_status, txt),
             )

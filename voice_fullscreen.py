@@ -18,6 +18,7 @@ _env = (Path(sys.executable).parent / ".env"
 load_dotenv(_env)
 from tools.voice import speak
 from tools import TOOL_FUNCTIONS
+from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
 from groq_client import GroqClient, repair_tool_use_failed
 
@@ -81,8 +82,8 @@ STOP_WORDS = {
     "goodbye","bye","exit","close","arrete","arrête",
 }
 
-MODEL_FAST  = "llama-3.1-8b-instant"     # questions simples sans outils (~300ms)
-MODEL_FULL  = "llama-3.3-70b-versatile"  # requêtes avec outils (~1-2s)
+MODEL_FAST  = "openai/gpt-oss-20b"       # questions simples sans outils (~300ms)
+MODEL_FULL  = "openai/gpt-oss-120b"      # requêtes avec outils (~1-2s)
 
 # ── Routeur d'outils (même logique que gui.py) ───────────────────────────────
 
@@ -364,6 +365,8 @@ class AmahVoiceUI:
 
     def _build(self):
         self.root = tk.Tk()
+        # Actions sensibles (mode normal et mode Live) : boite Oui/Non
+        set_confirm_handler(tk_confirm_handler(self.root))
         self.root.title("Amah — Interface Vocale")
         self.root.configure(bg=BG)
         self.root.attributes("-fullscreen", True)

@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"
+# Reformulation des resultats d'outils (agent.py) : modele plus leger, avec son
+# propre quota TPM Groq — ne consomme pas le budget du 120b.
+FINAL_MODEL = "openai/gpt-oss-20b"
 
 _HOME      = str(Path.home()).replace("\\", "/")
 _DESKTOP   = str(Path.home() / "Desktop").replace("\\", "/")
@@ -26,6 +29,25 @@ if _PROFILE_PATH.exists():
     ]
     if _lines:
         SYSTEM_PROMPT += "\n\nPROFIL UTILISATEUR :\n" + "\n".join(_lines)
+
+# Prompt court pour la finalisation apres outils (agent.py) : SYSTEM_PROMPT fait
+# ~3 600 tokens, surtout des regles de choix d'outils inutiles a ce stade, et le
+# renvoyer a chaque finalisation epuisait le quota Groq (8 000 TPM par cle).
+# Reprend les regles de redaction de system_prompt.txt — a garder coherent.
+RESPONSE_SYSTEM_PROMPT = (
+    "Tu es Amah — assistante IA locale, precise et efficace. Tu parles francais et "
+    "tu tutoies l'utilisateur. Tu rediges la reponse finale a partir des resultats "
+    "d'outils fournis.\n"
+    "- Tes reponses sont souvent lues a voix haute : phrases courtes et naturelles, "
+    "sans markdown, sauf si l'utilisateur demande un document, du code ou une liste "
+    "(ex : liste de fichiers).\n"
+    "- Si un outil retourne une erreur : ne la recopie pas, explique-la simplement et "
+    "propose une solution concrete. Si une action a ete refusee ou bloquee, dis-le.\n"
+    "- N'invente rien qui ne figure pas dans les resultats.\n"
+    "- Si l'utilisateur demande d'afficher le code ou le contenu d'un fichier, "
+    "affiche-le en entier dans un bloc de code, sans resumer.\n"
+    "- Ne cite ton createur (Amadou Doumbouya) que si on te le demande explicitement."
+)
 
 # ── Définitions compactes des outils (tokens optimisés) ─────────────────────
 def _f(name, desc, props=None, required=None):

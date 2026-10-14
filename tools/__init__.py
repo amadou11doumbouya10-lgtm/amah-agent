@@ -51,8 +51,12 @@ _TOOL_MODULES = [
     ("tools.webcam_guard", ["start_auto_mute", "stop_auto_mute"]),
 ]
 
+from tools.guard import guarded
+
+# Chaque outil passe par le garde-fou central (tools/guard.py) : les actions
+# sensibles demandent l'accord de l'utilisateur quelle que soit l'interface.
 TOOL_FUNCTIONS = {}
 for _module_name, _tool_names in _TOOL_MODULES:
     _module = importlib.import_module(_module_name)
     for _tool_name in _tool_names:
-        TOOL_FUNCTIONS[_tool_name] = getattr(_module, _tool_name)
+        TOOL_FUNCTIONS[_tool_name] = guarded(_tool_name, getattr(_module, _tool_name))

@@ -10,9 +10,15 @@ import os
 import re
 import json
 import time
+import socket
 import threading
+from urllib.parse import urlparse
 
+import httpx
+from dotenv import load_dotenv
 from groq import Groq
+
+load_dotenv()
 
 _DELAYS = [1, 2, 4]
 
@@ -69,7 +75,26 @@ def repair_tool_use_failed(e: Exception):
     if not isinstance(err, dict) or err.get("code") != "tool_use_failed":
         return None
 
-    m = _FAILED_GENERATION_RE.match(err.get("failed_generation") or "")
+    failed = (err.get("failed_generation") or "").strip()
+
+    # Format gpt-oss : JSON brut {"name": "...", "arguments": {...}}
+    if failed.startswith("{"):
+        try:
+            data, _ = json.JSONDecoder().raw_decode(failed)
+        except Exception:
+            return None
+        name, args = data.get("name"), data.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return None
+        if isinstance(name, str) and isinstance(args, dict):
+            return name, args
+        return None
+
+    # Format Llama : <function=NOM{"arg": "valeur"}</function>
+    m = _FAILED_GENERATION_RE.match(failed)
     if not m:
         return None
 
@@ -83,20 +108,48 @@ def repair_tool_use_failed(e: Exception):
     return name, args
 
 
+def _proxy_reachable(url: str) -> bool:
+    """Sonde rapide d'un proxy LiteLLM local.
+
+    Sous Windows une connexion refusee prend ~2s par adresse (localhost = ::1
+    puis 127.0.0.1) : sans cette sonde, chaque session perdait plusieurs
+    secondes au premier appel quand LITELLM_URL est defini mais le proxy eteint.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        return True  # proxy distant : le repli normal gere l'erreur
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    # IPv4 d'abord : LiteLLM ecoute generalement sur 0.0.0.0
+    candidates = ["127.0.0.1", "::1"] if host == "localhost" else [host]
+    for candidate in candidates:
+        try:
+            socket.create_connection((candidate, port), timeout=0.3).close()
+            return True
+        except OSError:
+            continue
+    return False
+
+
 class GroqClient:
     _instance = None
     _instance_lock = threading.Lock()
 
     def __init__(self):
         litellm_url = os.getenv("LITELLM_URL", "").strip()
-        if litellm_url:
+        if litellm_url and _proxy_reachable(litellm_url):
             # Mode dev : LiteLLM proxy local (quota illimite, failover multi-providers)
             # Invisible pour les clients — ils n'ont pas LITELLM_URL dans leur .env
             from openai import OpenAI as _OpenAI
             self._use_litellm = True
+            # max_retries=0 + connexion courte : si le proxy n'est pas lance, le
+            # SDK OpenAI retentait 3 fois une connexion refusee (~16s perdues
+            # au premier appel sous Windows) avant le repli sur Groq.
             self._litellm    = _OpenAI(
                 base_url=litellm_url,
                 api_key=os.getenv("LITELLM_KEY", "dev"),
+                max_retries=0,
+                timeout=httpx.Timeout(60.0, connect=2.0),
             )
             self._keys        = ["litellm"]
             self._index       = 0
@@ -113,7 +166,7 @@ class GroqClient:
         if not self._keys:
             raise RuntimeError("GROQ_API_KEY introuvable dans le fichier .env")
         self._index       = 0
-        self._client      = Groq(api_key=self._keys[0])
+        self._client      = Groq(api_key=self._keys[0], max_retries=0)
         self._client_lock = threading.Lock()
 
     @classmethod
@@ -141,7 +194,7 @@ class GroqClient:
         if len(self._keys) <= 1:
             return False
         self._index = (self._index + 1) % len(self._keys)
-        self._client = Groq(api_key=self._keys[self._index])
+        self._client = Groq(api_key=self._keys[self._index], max_retries=0)
         return True
 
     def chat(self, messages, model, tools=None, tool_choice=None, on_status=None, **kwargs):
@@ -163,7 +216,8 @@ class GroqClient:
                     return self._litellm.chat.completions.create(**params)
                 except Exception as e:
                     err = str(e)
-                    if "connection" in err.lower() or "refused" in err.lower() or "connect" in err.lower():
+                    proxy_down = isinstance(e.__cause__, (httpx.ConnectError, httpx.ConnectTimeout))
+                    if proxy_down or "connection" in err.lower() or "refused" in err.lower() or "connect" in err.lower():
                         # LiteLLM pas demarre — on repasse sur Groq direct silencieusement
                         self._use_litellm = False
                         self._keys = [k for k in [
@@ -174,7 +228,7 @@ class GroqClient:
                         if not self._keys:
                             raise RuntimeError("LiteLLM non disponible et aucune cle Groq dans .env")
                         self._index  = 0
-                        self._client = Groq(api_key=self._keys[0])
+                        self._client = Groq(api_key=self._keys[0], max_retries=0)
                         self._client_lock = threading.Lock()
                         break  # sort de la boucle LiteLLM, tombe sur Groq ci-dessous
                     if "503" in err or "timeout" in err.lower():
@@ -190,7 +244,8 @@ class GroqClient:
                 raise RuntimeError("LiteLLM proxy : echec apres plusieurs tentatives")
 
         keys_tried = 0
-        for attempt in range(len(_DELAYS) + len(self._keys)):
+        waits = 0
+        for _ in range((len(_DELAYS) + 1) * len(self._keys)):
             with self._client_lock:
                 client = self._client
             try:
@@ -209,19 +264,30 @@ class GroqClient:
                             on_status(f"Cle {self._index + 1}/{len(self._keys)} — limite atteinte, rotation...")
                         continue
                     # Toutes les cles epuisees : fail immediat pour quota journalier,
-                    # courte attente pour rate-limit par minute (peut se recuperer en ~1s).
+                    # courte attente pour rate-limit par minute puis nouveau tour de
+                    # rotation (une autre cle a pu se liberer entre-temps).
                     if is_daily:
                         raise RuntimeError("Quota journalier Groq epuise sur toutes les cles")
-                    delay = _DELAYS[min(attempt, len(_DELAYS) - 1)]
+                    if waits >= len(_DELAYS):
+                        raise RuntimeError("Toutes les cles Groq sont limitees (429) — reessaie dans une minute")
+                    delay = _DELAYS[waits]
+                    waits += 1
                     if on_status:
                         on_status(f"Toutes les cles limitees — attente {delay}s...")
                     time.sleep(delay)
-                elif "503" in err:
-                    time.sleep(_DELAYS[min(attempt, len(_DELAYS) - 1)])
-                elif "timeout" in err.lower() or "timed out" in err.lower():
+                    keys_tried = 0
+                    with self._client_lock:
+                        self._next_key()
+                elif ("503" in err or "timeout" in err.lower() or "timed out" in err.lower()
+                      or "connection" in err.lower()):
+                    # max_retries=0 sur le SDK : les coupures reseau passageres
+                    # (WinError 10054, APIConnectionError) sont retentees ici.
+                    if waits >= len(_DELAYS):
+                        raise
                     if on_status:
                         on_status("Reponse lente — nouvelle tentative...")
-                    time.sleep(_DELAYS[min(attempt, len(_DELAYS) - 1)])
+                    time.sleep(_DELAYS[waits])
+                    waits += 1
                 else:
                     raise
 

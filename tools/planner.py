@@ -76,7 +76,7 @@ def create_plan(goal: str) -> dict:
                 {"role": "system", "content": _PLAN_SYSTEM},
                 {"role": "user", "content": f"Objectif: {goal}"},
             ],
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             response_format={"type": "json_object"},
             max_tokens=1024,
             temperature=0.2,
@@ -126,9 +126,9 @@ def _suggest_alternative(goal: str, step: dict, error: str):
                     f"Erreur: {error}"
                 )},
             ],
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             response_format={"type": "json_object"},
-            max_tokens=300,
+            max_tokens=900,
             temperature=0.3,
         )
         alt = json.loads(resp.choices[0].message.content)

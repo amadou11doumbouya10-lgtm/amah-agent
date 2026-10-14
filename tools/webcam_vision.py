@@ -36,8 +36,9 @@ def _capture_and_ask(question: str) -> dict:
                 {"type": "text", "text": question},
             ]
         }],
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        model="qwen/qwen3.8-27b",
         max_tokens=1024,
+        reasoning_effort="none",
     )
     return {
         "success":   True,
@@ -49,7 +50,7 @@ def _capture_and_ask(question: str) -> dict:
 
 
 def analyze_webcam(question: str = "Decris precisement ce que tu vois.") -> dict:
-    """Capture une image via la webcam et l'analyse par IA visuelle (Groq llama-4-scout, multimodal).
+    """Capture une image via la webcam et l'analyse par IA visuelle (Groq qwen3.8-27b, multimodal).
     Utilisation : qui est devant la camera ? / que vois-tu via la webcam ? / decris ce que tu vois devant toi."""
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
