@@ -16,21 +16,11 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 
-SAFE_TOOLS = {
-    "get_datetime", "calculate", "add_days", "convert_units",
-    "get_weather", "get_weather_simple", "get_system_info",
-    "web_search", "read_webpage", "screenshot_full", "take_screenshot",
-    "find_files", "list_files", "read_file", "open_file", "open_browser",
-    "get_page_text", "speak",
-}
-
-CONFIRM_TOOLS = {
-    "write_file", "create_file", "edit_file", "delete_file", "move_file",
-    "copy_file", "rename_file", "create_directory", "delete_directory",
-    "run_command", "install_package", "open_app", "close_app",
-    "fill_form", "click_element", "send_email", "send_message",
-    "save_memory", "delete_memory", "set_reminder", "send_notification",
-}
+# Faut-il demander l'accord ? C'est le garde-fou central (tools/guard.py) qui
+# décide, comme pour la fenêtre et la voix. Avant, ce module avait ses propres
+# listes : 18 outils "sûrs", tous les autres soumis à confirmation — le
+# terminal demandait l'autorisation pour lire la mémoire, faire le briefing ou
+# traduire (banc des 3 interfaces, 18/10/2026). Il garde ici ses blocages.
 
 RESTRICTED_TOOLS = {
     "format_disk", "shutdown", "restart_system", "disable_security",
@@ -75,15 +65,11 @@ def classify_tool(name: str, args: Optional[Dict[str, Any]] = None) -> str:
     low = tool.lower()
     if low in RESTRICTED_TOOLS:
         return "RESTRICTED"
-    if low in CONFIRM_TOOLS:
+    try:
+        from tools.guard import needs_confirmation
+        return "CONFIRM" if needs_confirmation(tool, args) else "SAFE"
+    except Exception:
         return "CONFIRM"
-    if low in SAFE_TOOLS:
-        return "SAFE"
-    if low == "run_command":
-        return "CONFIRM"
-    if any(token in low for token in ("delete", "remove", "wipe", "format", "shutdown", "restart")):
-        return "CONFIRM"
-    return "CONFIRM"
 
 
 def _confirmation_prompt(tool: str, args: Dict[str, Any]) -> str:
@@ -109,7 +95,7 @@ def authorize_tool(name: str, args: Optional[Dict[str, Any]] = None, source: str
                 return Authorization(tool, "RESTRICTED", False, False, "Commande bloquée par Security V0.2 : opération système potentiellement destructive.", pattern)
 
     if level == "SAFE":
-        return Authorization(tool, level, True, False, "Action sûre autorisée.", "outil dans la liste SAFE")
+        return Authorization(tool, level, True, False, "Action sûre autorisée.", "non sensible pour le garde-fou central")
 
     try:
         answer = input(_confirmation_prompt(tool, args)).strip().lower()

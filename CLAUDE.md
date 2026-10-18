@@ -46,6 +46,13 @@ amah-agent/
 │   ├── instant.py            ← Réponses sans IA : heure, date, calcul simple
 │   ├── memory_context.py     ← Rappel de mémoire V0.2.4 ("tu te souviens…")
 │   ├── guard.py              ← Confirmation des actions sensibles (refus par défaut)
+│   ├── conversation.py       ← Commun aux 3 interfaces : troncature des résultats,
+│   │                            coupure sûre de l'historique, texte pour la voix,
+│   │                            journal d'erreurs (1re brique du futur Amah Core)
+│   ├── page_text.py          ← Contenu principal d'une page web (sans menus)
+│   ├── reader.py             ← read_aloud : lecture complète à voix haute
+│   ├── briefing.py           ← morning_briefing : le point du jour (sans IA)
+│   ├── email_watch.py        ← Emails importants non lus + alertes (sans IA)
 │   │   ── Briques v0.x utilisées ──
 │   ├── router_v03.py         ← Intentions précises (utilisées par tool_router)
 │   ├── router_v04.py         ← Ne sert plus qu'à normaliser le texte heure/date
@@ -54,7 +61,8 @@ amah-agent/
 │   ├── planner_v04.py        ← Comparaison/recommandation de produits (agent.py)
 │   ├── planner_v06.py        ← Recherche approfondie, tout sujet (agent.py)
 │   ├── executor_v03.py       ← Exécution vérifiée des plans (+ executor_v02, verification_v02)
-│   ├── security_v02.py       ← Confirmation terminal (agent.py)
+│   ├── security_v02.py       ← Blocages du terminal ; confirmer ou non = garde-fou
+│   │                            central (needs_confirmation de guard.py)
 │   ├── capability_bridge_v01.py ← Workflows écran / navigateur+voix (agent.py)
 │   ├── fastpath_v01.py       ← Capture, calcul, recherche directe (agent.py)
 │   ├── voice_pipeline_v01.py ← Commande vocale dans le terminal (agent.py)
@@ -127,6 +135,11 @@ py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique
 py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
 py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code PowerShell : 13/13
 py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
+py -3.13 -m benchmarks.benchmark_conversation  # briques communes + sécurité terminal : 15/15
+py -3.13 -m benchmarks.benchmark_interfaces --sans-ia   # 3 interfaces, demandes sans IA : 12/12
+# Avec appels IA (~150 000 tokens, à espacer) : les 3 interfaces sur 10 demandes,
+# test de référence du plan Amah Core (18/10 : 10/10, 10/10, 9/10)
+py -3.13 -m benchmarks.benchmark_interfaces
 ```
 
 ## Installation et lancement
@@ -421,13 +434,20 @@ n'est importé avant l'affichage — à garder ainsi (mesurer avec
 ### Terminal (agent.py) — usage développeur
 - Lance avec : py -3.13 agent.py
 - Affiche les appels d'outils et les diagnostics [ROUTER] / [MEMORY] / [PERF]
-- Ordre de traitement : mémoire (si AMAH_MEMORY_V024=1) → heure/date →
+- Ordre de traitement : réponses instantanées partagées (instant.py : heure,
+  calcul, briefing, lecture à voix haute) → mémoire (si AMAH_MEMORY_V024=1) → heure/date →
   contexte (objectif, budget) → commande explicite ("exécute la commande …"
   ou commande reconnue comme ipconfig / Get-Process) → Capability Bridge
   (écran) → recherche approfondie (planner_v06) → FastPath → comparaison de
   produits (planner_v04) → routeur partagé → IA + outils → reformulation 20b
-- Un seul tour d'outils par message : "fais X puis Y" n'exécute que X
-- Confirmation des actions sensibles par question dans le terminal
+- Un seul tour d'outils par message : "fais X puis Y" n'exécute que X (à régler
+  par l'étape 1 du plan Amah Core) ; réponse finale rédigée sur gpt-oss-20b avec
+  un prompt court : ~5 000 tokens par demande avec outils, 2× moins que gui.py
+- Confirmation des actions sensibles par question dans le terminal : mêmes
+  outils que le garde-fou central (avant, security_v02 demandait l'accord
+  pour tout outil hors d'une liste de 18, même lire la mémoire)
+- Capability Bridge "ouvrir + lire à voix haute" : seulement si la demande
+  parle du titre ; lire une page = read_aloud
 
 ### Fenêtre graphique (gui.py) — interface clients
 - Lance avec : py -3.13 gui.py
@@ -454,6 +474,13 @@ n'est importé avant l'affichage — à garder ainsi (mesurer avec
 - Boucle écoute → réponse → synthèse vocale entièrement automatique
 - Réponses instantanées + routeur partagé + 3 outils locaux (mode Live,
   aperçu webcam, champ texte) ; conversation pure sur gpt-oss-20b
+- Conversations enregistrées dans amah_memory.db (session "voix_…") : avant,
+  tout ce qui était dit à la voix était perdu pour la mémoire
+- Résultats d'outils tronqués et historique coupé sans résultat orphelin
+  (tools/conversation.py, comme gui.py) ; Markdown retiré avant de parler
+  (speech_text) ; erreurs dans amah_errors.log
+- Pas encore : rappel de mémoire "tu te souviens", briefing et alertes
+  (prévus par l'étape 1 du plan Amah Core)
 - F11 : plein écran/fenêtré, Échap ou "ferme" : quitter
 
 ### Mot de réveil "Amah" (amah_listener.py)
@@ -726,6 +753,14 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
 - [x] Sécurité : injection PowerShell corrigée (notification, voix, presse-papiers)
 - [x] Initiatives : briefing du jour au premier lancement + alertes d'emails
   importants (morning_briefing, 101e outil ; sans appel IA) ; météo en français
+- [x] Préparation du plan Amah Core (banc des 3 interfaces) : fenêtre 8→10/10,
+  voix 6→10/10, terminal 5→9/10. Voix : conversations enregistrées, résultats
+  tronqués, historique coupé sans orphelin, Markdown retiré avant de parler.
+  Terminal : réponses instantanées partagées, confirmations = garde-fou central.
+  Module commun tools/conversation.py. Reste pour l'étape 1 : rappel de mémoire
+  et initiatives dans la voix, plusieurs outils dans le terminal, et la
+  rédaction finale économe (prompt court sur 20b) dans la fenêtre et la voix
+  (8 000-17 000 tokens par demande avec outils contre ~5 000 au terminal)
 - [x] Démarrage 2× plus rapide : edge_tts, groq, Playwright, PyMuPDF chargés
   à la demande, identifiant machine calculé pendant les imports
 - [x] .exe recompilé avec ces corrections (zip 184 Mo) : testé depuis le zip

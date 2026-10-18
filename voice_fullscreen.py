@@ -21,6 +21,8 @@ from tools import TOOL_FUNCTIONS
 from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply
+from tools.conversation import log_error, clip_tool_result, trim_history, speech_text
+from tools.memory import save_message
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS, chat_messages
 from groq_client import GroqClient, repair_tool_use_failed
@@ -258,6 +260,9 @@ class AmahVoiceUI:
         except RuntimeError as e:
             raise SystemExit(str(e))
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Conversations enregistrées (mémoire, "tu te souviens", reprise) : avant,
+        # tout ce qui était dit à l'interface vocale était perdu
+        self.session_id = "voix_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.state    = "IDLE"
         self._frame   = 0
@@ -765,7 +770,7 @@ class AmahVoiceUI:
             # meme peripherique.
             self._live_mode = (action == "start")
             if reply and not is_err:
-                self._tts.say(reply[:450])
+                self._tts.say(speech_text(reply)[:450])
             # Efface un eventuel message de statut Groq (rotation de cle)
             # laisse par _on_status pendant ce dernier echange.
             self.root.after(0, self._user_var.set, "")
@@ -787,7 +792,7 @@ class AmahVoiceUI:
             # synthèse échoue plutôt que de l'avaler en silence.
             # Pendant une lecture à voix haute : réponse affichée seulement,
             # sinon les deux voix parlent en même temps.
-            voice_res = {} if _reading_aloud() else self._tts.say(reply[:450])
+            voice_res = {} if _reading_aloud() else self._tts.say(speech_text(reply)[:450])
             if "error" in voice_res:
                 self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
                                 f"Voix indisponible : {voice_res['error'][:120]}")
@@ -799,13 +804,14 @@ class AmahVoiceUI:
     def _chat(self, text: str):
         """Retourne (reply: str, is_error: bool)."""
         self.messages.append({"role": "user", "content": text})
-        if len(self.messages) > 22:
-            self.messages = [self.messages[0]] + self.messages[-20:]
+        self.messages = trim_history(self.messages, 20)
+        self._save("user", text)
 
         # Heure, date, calcul simple : réponse immédiate sans appel IA
         instant = instant_reply(text)
         if instant:
             self.messages.append({"role": "assistant", "content": instant})
+            self._save("assistant", instant)
             return instant, False
 
         tools = _select_tools(text)
@@ -863,7 +869,7 @@ class AmahVoiceUI:
                     "tool_calls": [{"id": tc.id, "type": "function",
                                     "function": {"name": name, "arguments": tc.function.arguments}}],
                 })
-                res = self._run_tool(tc, on_status=_on_status)
+                res = clip_tool_result(name, self._run_tool(tc, on_status=_on_status))
                 msgs.append({"role": "tool", "tool_call_id": tc.id, "content": res})
                 # Ajoute l'outil réparé à la liste courante au lieu des 99
                 extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == name]
@@ -886,7 +892,7 @@ class AmahVoiceUI:
                     ],
                 })
                 for tc in msg.tool_calls:
-                    res = self._run_tool(tc, on_status=_on_status)
+                    res = clip_tool_result(tc.function.name, self._run_tool(tc, on_status=_on_status))
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -908,9 +914,7 @@ class AmahVoiceUI:
                         id="txt-repair-0",
                         function=SimpleNamespace(name=_tname, arguments=_targs),
                     )
-                    _res = self._run_tool(_fake, on_status=_on_status)
-                    if len(_res) > 2000:
-                        _res = _res[:2000] + "\n...[tronqué]"
+                    _res = clip_tool_result(_tname, self._run_tool(_fake, on_status=_on_status))
                     self.messages.append({
                         "role": "assistant", "content": "",
                         "tool_calls": [{"id": "txt-repair-0", "type": "function",
@@ -926,9 +930,18 @@ class AmahVoiceUI:
 
             reply = resp.choices[0].message.content or "Compris."
             self.messages.append({"role": "assistant", "content": reply})
+            self._save("assistant", reply)
             return reply, False
         except Exception as e:
+            log_error(f"voix | {text[:120]!r}", e)
             return f"Erreur API : {e}", True
+
+    def _save(self, role: str, content: str):
+        """Enregistre un message dans l'historique (amah_memory.db)."""
+        try:
+            save_message(self.session_id, role, content)
+        except Exception as e:
+            log_error("voix | enregistrement de l'historique", e)
 
     def _run_tool(self, tc, on_status=None) -> str:
         try:

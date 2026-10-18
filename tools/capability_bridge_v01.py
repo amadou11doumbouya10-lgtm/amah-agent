@@ -111,7 +111,10 @@ def build_capability_plan(user_text: str, tool_functions: Dict[str, object], max
         capabilities.append("browser")
 
     # Workflows déterministes : on évite ici tout appel LLM.
-    if "browser" in capabilities and "voice" in capabilities and url_match:
+    # "Ouvre X et lis le titre" seulement : "lis-moi l'article à voix haute"
+    # relève de read_aloud (page entière), plus de ce raccourci.
+    if ("browser" in capabilities and "voice" in capabilities and url_match
+            and re.search(r"\btitres?\b", text)):
         return CapabilityPlan(
             capabilities=capabilities,
             tools=[name for name in ("open_browser", "speak") if name in tool_functions],

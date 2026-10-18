@@ -22,6 +22,10 @@ from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply
+# Journal d'erreurs, troncature des résultats, coupure de l'historique, texte
+# pour la voix : communs aux 3 interfaces (tools/conversation.py)
+from tools.conversation import (log_error as _log_error, clip_tool_result as _clip_result,
+                                trim_history, speech_text)
 from tools.memory_context import memory_context, memory_instruction, SUMMARY_SYSTEM as MEMORY_SUMMARY_SYSTEM
 from tools.memory_recall_v024 import format_recall
 from tools.guard import set_confirm_handler, tk_confirm_handler
@@ -132,36 +136,6 @@ TOOL_LABELS = {
 # ── Journal d'erreurs ───────────────────────────────────────────────────────
 # Sans trace, une demande restée sans réponse était impossible à diagnostiquer
 # (test du 18/10 : deux messages renvoyés par l'utilisateur, cause inconnue).
-_ERROR_LOG = (Path(sys.executable).parent if getattr(sys, "frozen", False)
-              else Path(__file__).resolve().parent) / "amah_errors.log"
-
-
-def _log_error(context: str, exc: BaseException) -> None:
-    """Ajoute l'erreur (avec la pile d'appels) à amah_errors.log, limité à ~500 Ko."""
-    try:
-        if _ERROR_LOG.exists() and _ERROR_LOG.stat().st_size > 500_000:
-            _ERROR_LOG.write_text(_ERROR_LOG.read_text(encoding="utf-8", errors="replace")[-250_000:],
-                                  encoding="utf-8")
-        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-        with _ERROR_LOG.open("a", encoding="utf-8") as f:
-            f.write(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] {context}\n{trace}")
-    except Exception:
-        pass
-
-
-# Pages web : 4 000 caractères pour pouvoir résumer un article (les 2 000
-# premiers ne contiennent souvent que le chapeau) ; le reste : 2 000.
-_LONG_RESULT_TOOLS = {"get_page_text", "read_webpage"}
-
-
-def _clip_result(tool_name, result: str) -> str:
-    """Tronque un résultat d'outil avant de l'envoyer au modèle (tokens)."""
-    limit = 4000 if resolve_tool_name(tool_name) in _LONG_RESULT_TOOLS else 2000
-    if len(result) > limit:
-        return result[:limit] + "\n...[tronqué pour économiser les tokens]"
-    return result
-
-
 def _fit_window(root, width: int, height: int) -> int:
     """Taille réduite à l'écran puis fenêtre centrée ; renvoie la hauteur retenue.
 
@@ -1001,7 +975,7 @@ class AmahGUI:
             return      # une page est lue à voix haute : pas deux voix à la fois
         try:
             from tools.voice import speak
-            short = text[:220].replace("\n", " ")
+            short = speech_text(text)[:220]
             res = speak(short, speed=1)
             if "error" in res:
                 self.root.after(0, self._set_status, "[!] Voix indisponible", "#cc4444")
@@ -1233,14 +1207,7 @@ class AmahGUI:
     def _trim_messages(self):
         """Garde system prompt + MAX_MESSAGES derniers messages.
         Préserve les paires tool_call/tool_result pour éviter les erreurs API."""
-        if len(self.messages) <= MAX_MESSAGES + 1:
-            return
-        system  = self.messages[0]
-        tail    = self.messages[-MAX_MESSAGES:]
-        # S'assurer qu'on ne coupe pas une paire tool_call orpheline
-        while tail and tail[0].get("role") == "tool":
-            tail = tail[1:]
-        self.messages = [system] + tail
+        self.messages = trim_history(self.messages, MAX_MESSAGES)
 
     def _groq_call(self, messages, tools=None, model_override=None, tool_choice=None):
         """Appel Groq via le client partage (rotation de cles + retry backoff geres

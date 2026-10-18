@@ -48,7 +48,7 @@ from tools.memory_context import (
     memory_instruction,
     normalize_for_matching as _normalize_for_matching,
 )
-from tools.instant import datetime_request_kind
+from tools.instant import datetime_request_kind, instant_reply as shared_instant_reply
 
 
 
@@ -1086,6 +1086,19 @@ def chat(
     context_hint = context.format_hint()
 
     try:
+        # ====================================================================
+        # RÉPONSES INSTANTANÉES PARTAGÉES (tools/instant.py)
+        # ====================================================================
+        # Heure, calcul, briefing, lecture à voix haute (lancement, arrêt) :
+        # sans appel IA, comme la fenêtre et la voix. Avant, "fais-moi le point"
+        # coûtait 2 appels IA, et "lis-moi à voix haute <lien>" ouvrait le
+        # navigateur pour ne lire que l'adresse (banc des 3 interfaces, 18/10).
+        instant = shared_instant_reply(user_text)
+        if instant:
+            if PERF_LOG:
+                console.print("[dim #7a5f38][INSTANT] réponse sans appel IA[/dim #7a5f38]")
+            return instant
+
         # ====================================================================
         # MEMORY
         # ====================================================================

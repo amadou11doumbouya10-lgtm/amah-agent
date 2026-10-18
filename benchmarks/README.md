@@ -13,9 +13,15 @@ cas d'échec :
 
 | Script | Vérifie |
 |---|---|
-| `benchmark_tool_router.py` | Le routeur partagé sur 95 phrases (40 de l'audit, 55 formulées autrement que ses mots-clés). Attendu : 100 %. |
+| `benchmark_tool_router.py` | Le routeur partagé sur 101 phrases (40 de l'audit, 55 formulées autrement que ses mots-clés, 6 régressions vues en vrai). Attendu : 100 %. |
 | `benchmark_guard.py` | Le garde-fou des actions sensibles : refus par défaut, Oui/Non, filtre de commandes, terminal. Attendu : 15/15. |
 | `benchmark_license.py` | Les licences signées : clé valide acceptée, autre machine / clé modifiée / ancien format refusés, clé privée du .env = clé publique du code. Attendu : 11/11. |
+| `benchmark_history.py` | Conservation de l'historique (AMAH_HISTORY_DAYS) et reprise de la dernière session. Attendu : 11/11. |
+| `benchmark_page_text.py` | Contenu principal des pages (sans menus ni bandeaux), découpage et arrêt de la lecture à voix haute. Attendu : 14/14. |
+| `benchmark_injection.py` | Aucun texte externe dans le code PowerShell (notification, repli vocal, presse-papiers). Attendu : 13/13. |
+| `benchmark_initiatives.py` | Emails importants, alertes (nouveaux emails seulement), briefing du jour. Attendu : 18/18. |
+| `benchmark_conversation.py` | Briques communes aux 3 interfaces (troncature, coupure de l'historique, texte pour la voix) et confirmations du terminal. Attendu : 15/15. |
+| `benchmark_interfaces.py --sans-ia` | Les demandes qui ne doivent jamais appeler l'IA (heure, briefing, lecture, arrêt) dans les 3 interfaces. Attendu : 12/12. |
 
 Pour le routeur, n'ajoute pas un mot-clé juste pour faire passer une phrase du
 jeu « nouvelles phrases » : ce jeu mesure la compréhension de formulations
@@ -33,6 +39,12 @@ motifs et donnaient 100 % alors que le routeur ratait 80 % des vraies demandes.
 
 Ils consomment le quota journalier (200 000 tokens par jour et par clé sur
 gpt-oss-120b, soit environ 40 demandes avec outils). Espace-les.
+
+**`benchmark_interfaces.py`** (sans option) est le test de référence de
+l'étape 1 du plan Amah Core : les mêmes 10 demandes envoyées à la fenêtre, à la
+voix et au terminal (~25 appels, ~150 000 tokens, ~15 minutes avec les pauses).
+Mesuré le 18/10/2026 : fenêtre 10/10, voix 10/10, terminal 9/10. Objectif de
+l'étape 1 : 30/30.
 
 `benchmark_99tools_isolation.py`, `benchmark_agent.py`, `benchmark_content_isolation.py`,
 `benchmark_context.py`, `benchmark_generation_debug.py`, `benchmark_generation_threshold.py`,
