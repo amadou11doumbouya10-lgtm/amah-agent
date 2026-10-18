@@ -1,6 +1,24 @@
+import os
 import subprocess
 import threading
 import time
+
+# Le titre et le texte passent par des variables d'environnement, jamais dans
+# le code du script : PowerShell traite aussi ’ ‘ comme des apostrophes, et un
+# sujet d'email piégé ("Facture’; <commande>; ‘") exécutait du code (testé).
+_NOTIFY_PS = """
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Application
+$n.BalloonTipIcon  = [System.Windows.Forms.ToolTipIcon]::Info
+$n.BalloonTipTitle = $env:AMAH_NOTIF_TITLE
+$n.BalloonTipText  = $env:AMAH_NOTIF_TEXT
+$n.Visible = $true
+$n.ShowBalloonTip([int]$env:AMAH_NOTIF_MS)
+Start-Sleep -Milliseconds ([int]$env:AMAH_NOTIF_MS + 2000)
+$n.Dispose()
+"""
 
 
 def send_notification(title: str, message: str, duration: int = 5) -> dict:
@@ -9,25 +27,19 @@ def send_notification(title: str, message: str, duration: int = 5) -> dict:
     Aucune dépendance externe — utilise Windows Forms via PowerShell.
     """
     try:
-        t = title.replace("'", " ")
-        m = message.replace("'", " ")
-        ps = f"""
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$n = New-Object System.Windows.Forms.NotifyIcon
-$n.Icon = [System.Drawing.SystemIcons]::Application
-$n.BalloonTipIcon  = [System.Windows.Forms.ToolTipIcon]::Info
-$n.BalloonTipTitle = '{t}'
-$n.BalloonTipText  = '{m}'
-$n.Visible = $true
-$n.ShowBalloonTip({duration * 1000})
-Start-Sleep -Seconds {duration + 2}
-$n.Dispose()
-"""
+        try:
+            seconds = max(1, min(60, int(duration)))
+        except (TypeError, ValueError):
+            seconds = 5
+        env = {**os.environ,
+               # Une bulle Windows tronque au-delà de ~250 caractères
+               "AMAH_NOTIF_TITLE": str(title or "Amah")[:60],
+               "AMAH_NOTIF_TEXT": str(message or " ")[:250],
+               "AMAH_NOTIF_MS": str(seconds * 1000)}
         threading.Thread(
             target=lambda: subprocess.run(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
-                creationflags=subprocess.CREATE_NO_WINDOW
+                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", _NOTIFY_PS],
+                creationflags=subprocess.CREATE_NO_WINDOW, env=env,
             ),
             daemon=True
         ).start()

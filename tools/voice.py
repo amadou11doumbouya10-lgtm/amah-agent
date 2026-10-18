@@ -118,12 +118,18 @@ def speak(text: str, speed: int = 2) -> dict:
 
     # Fallback Windows TTS (hors ligne)
     try:
-        ps_safe = safe.replace('`', '``').replace('$', '`$')
+        # Texte passé par variable d'environnement, jamais dans le code du
+        # script : PowerShell traite aussi “ ” „ comme des guillemets, et un
+        # texte piégé (page lue par read_aloud) exécutait du code (testé).
+        try:
+            rate = int(max(-10, min(10, int(speed))))
+        except (TypeError, ValueError):
+            rate = 2
         ps = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            f"$s.Rate = {int(max(-10, min(10, speed)))}; "
-            f"$s.Speak(\"{ps_safe}\");"
+            "$s.Rate = [int]$env:AMAH_TTS_RATE; "
+            "$s.Speak($env:AMAH_TTS_TEXT);"
         )
         if _stopped.is_set():
             return {"success": True, "dit": original[:120], "interrompu": True}
@@ -132,6 +138,7 @@ def speak(text: str, speed: int = 2) -> dict:
             creationflags=subprocess.CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env={**os.environ, "AMAH_TTS_TEXT": safe, "AMAH_TTS_RATE": str(rate)},
         )
         proc.wait()
         _ps_proc = None
