@@ -14,11 +14,16 @@ import socket
 import threading
 from urllib.parse import urlparse
 
-import httpx
 from dotenv import load_dotenv
-from groq import Groq
 
 load_dotenv()
+
+
+def _new_groq(api_key: str):
+    """Client Groq. Le paquet groq (~0,7 s à importer) n'est chargé qu'ici :
+    plus au démarrage d'Amah (gui.py le précharge une fois la fenêtre affichée)."""
+    from groq import Groq
+    return Groq(api_key=api_key, max_retries=0)
 
 _DELAYS = [1, 2, 4]
 
@@ -140,6 +145,7 @@ class GroqClient:
         if litellm_url and _proxy_reachable(litellm_url):
             # Mode dev : LiteLLM proxy local (quota illimite, failover multi-providers)
             # Invisible pour les clients — ils n'ont pas LITELLM_URL dans leur .env
+            import httpx
             from openai import OpenAI as _OpenAI
             self._use_litellm = True
             # max_retries=0 + connexion courte : si le proxy n'est pas lance, le
@@ -166,8 +172,22 @@ class GroqClient:
         if not self._keys:
             raise RuntimeError("GROQ_API_KEY introuvable dans le fichier .env")
         self._index       = 0
-        self._client      = Groq(api_key=self._keys[0], max_retries=0)
+        self._client      = None          # créé au premier appel (ou par warm_up)
         self._client_lock = threading.Lock()
+
+    def _ensure_client(self):
+        with self._client_lock:
+            if self._client is None and not getattr(self, "_use_litellm", False):
+                self._client = _new_groq(self._keys[self._index])
+            return self._client
+
+    def warm_up(self):
+        """Prépare le client en arrière-plan pour que le 1er message ne paie pas
+        l'import de groq et la connexion sécurisée."""
+        try:
+            self._ensure_client()
+        except Exception:
+            pass
 
     @classmethod
     def get(cls) -> "GroqClient":
@@ -194,7 +214,7 @@ class GroqClient:
         if len(self._keys) <= 1:
             return False
         self._index = (self._index + 1) % len(self._keys)
-        self._client = Groq(api_key=self._keys[self._index], max_retries=0)
+        self._client = _new_groq(self._keys[self._index])
         return True
 
     def chat(self, messages, model, tools=None, tool_choice=None, on_status=None, **kwargs):
@@ -216,6 +236,7 @@ class GroqClient:
                     return self._litellm.chat.completions.create(**params)
                 except Exception as e:
                     err = str(e)
+                    import httpx
                     proxy_down = isinstance(e.__cause__, (httpx.ConnectError, httpx.ConnectTimeout))
                     if proxy_down or "connection" in err.lower() or "refused" in err.lower() or "connect" in err.lower():
                         # LiteLLM pas demarre — on repasse sur Groq direct silencieusement
@@ -228,7 +249,7 @@ class GroqClient:
                         if not self._keys:
                             raise RuntimeError("LiteLLM non disponible et aucune cle Groq dans .env")
                         self._index  = 0
-                        self._client = Groq(api_key=self._keys[0], max_retries=0)
+                        self._client = _new_groq(self._keys[0])
                         self._client_lock = threading.Lock()
                         break  # sort de la boucle LiteLLM, tombe sur Groq ci-dessous
                     if "503" in err or "timeout" in err.lower():
@@ -246,8 +267,7 @@ class GroqClient:
         keys_tried = 0
         waits = 0
         for _ in range((len(_DELAYS) + 1) * len(self._keys)):
-            with self._client_lock:
-                client = self._client
+            client = self._ensure_client()
             try:
                 return client.chat.completions.create(**params)
             except Exception as e:

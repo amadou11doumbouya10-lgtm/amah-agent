@@ -5,8 +5,6 @@ import tempfile
 import threading
 from concurrent.futures import Future
 
-import edge_tts
-
 VOICE = "fr-FR-HenriNeural"
 
 _ps_proc = None  # processus PowerShell de lecture en cours (pour stop_voice)
@@ -15,6 +13,7 @@ _stopped = threading.Event()  # pose par stop_voice : interruption volontaire
 
 async def _generate_tts(text: str, rate: str) -> str:
     """Génère le MP3 avec edge-tts et retourne son chemin."""
+    import edge_tts   # ~1,3 s : chargé à la première parole, plus au démarrage d'Amah
     tts = edge_tts.Communicate(text, voice=VOICE, rate=rate)
     fd, path = tempfile.mkstemp(suffix=".mp3")
     os.close(fd)

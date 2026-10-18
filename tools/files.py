@@ -3,11 +3,14 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-try:
-    import fitz  # PyMuPDF — pour edit_pdf
-    _FITZ_OK = True
-except ImportError:
-    _FITZ_OK = False
+def _fitz():
+    """PyMuPDF (edit_pdf, lecture des PDF), ou None s'il manque. Chargé au
+    premier PDF : ~0,13 s et une DLL de 40 Mo de moins au démarrage d'Amah."""
+    try:
+        import fitz
+        return fitz
+    except ImportError:
+        return None
 
 CATEGORIES = {
     "Images":        [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tiff", ".raw"],
@@ -197,7 +200,8 @@ def write_file(path: str, content: str) -> dict:
 
 def edit_pdf(path: str, old_text: str, new_text: str) -> dict:
     """Modifie du texte dans un PDF existant en gardant la mise en page."""
-    if not _FITZ_OK:
+    fitz = _fitz()
+    if fitz is None:
         return {"error": "PyMuPDF non installé. Lance : pip install pymupdf"}
 
     p = Path(path).expanduser()
@@ -285,7 +289,8 @@ def summarize(path: str) -> dict:
     ext = p.suffix.lower()
     try:
         if ext == ".pdf":
-            if _FITZ_OK:
+            fitz = _fitz()
+            if fitz is not None:
                 doc  = fitz.open(str(p))
                 text = "\n".join(page.get_text() for page in doc)
                 doc.close()

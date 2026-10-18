@@ -19,6 +19,7 @@ import base64
 import os
 import subprocess
 import sys
+import threading
 
 # Clé publique de l'éditeur (Ed25519, 32 octets en base64) — publique par nature.
 # Elle correspond à AMAH_LICENSE_PRIVATE_KEY du .env développeur.
@@ -34,7 +35,31 @@ def _run_ps(cmd: str, timeout: int = 10) -> str:
     return r.stdout.strip()
 
 
+_machine_id = None
+_machine_id_lock = threading.Lock()
+
+
+def prefetch_machine_id():
+    """Lance le calcul de l'identifiant machine (PowerShell, ~0,5 s) en
+    arrière-plan : gui.py l'appelle avant ses imports, la vérification de la
+    licence trouve ensuite la valeur prête."""
+    threading.Thread(target=get_machine_id, name="amah-machine-id", daemon=True).start()
+
+
 def get_machine_id() -> str:
+    """UUID de la machine, calculé une seule fois (verrou : un appel pendant
+    le préchargement attend son résultat au lieu de relancer PowerShell)."""
+    global _machine_id
+    with _machine_id_lock:
+        if _machine_id is None:
+            uid = _read_machine_id()
+            if uid == "UNKNOWN":
+                return uid          # échec passager : on réessaiera au prochain appel
+            _machine_id = uid
+        return _machine_id
+
+
+def _read_machine_id() -> str:
     """Récupère l'UUID unique de la machine Windows.
     Get-CimInstance (WinRM) répond plus vite et plus fiablement que
     Get-WmiObject (DCOM legacy) sous charge système ; un retry absorbe

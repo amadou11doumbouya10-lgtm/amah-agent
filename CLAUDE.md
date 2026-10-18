@@ -384,6 +384,24 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Trimming contexte API : [system] + 40 derniers messages max
 - Troncature tool_results : 2000 chars en mémoire vive, 800 chars en DB
 
+## Démarrage (mesuré le 18/10/2026)
+Fenêtre affichée en ~2,5-3,3 s avec python gui.py (5,4 s avant). .exe testé
+depuis le zip dans un dossier vierge : écran de configuration 5,3 s à froid
+puis 1,7-2,3 s (10 s avant) ; fenêtre principale d'un client configuré
+2,6-3,9 s (5,5-7,5 s avant). Rien de lourd
+n'est importé avant l'affichage — à garder ainsi (mesurer avec
+`py -3.13 -X importtime -c "import gui"`) :
+- edge_tts (~1,3 s) : importé dans _generate_tts (tools/voice.py)
+- groq (~0,7 s) : importé par _new_groq (groq_client.py) ; client créé au
+  premier appel ou par GroqClient.warm_up()
+- Playwright (~0,3 s) : importé dans _ensure_browser (tools/browser.py)
+- PyMuPDF (~0,13 s + DLL 40 Mo) : _fitz() dans tools/files.py
+- identifiant machine de la licence (PowerShell ~0,5 s) : prefetch_machine_id()
+  en tête de gui.py, calculé pendant les imports ; get_machine_id met en cache
+- gui.py `_prewarm` : 0,6 s après l'affichage, client Groq + edge_tts chargés
+  en arrière-plan → le premier message ne paie pas ces imports
+- Chez le développeur seulement : sonde LiteLLM ~0,6 s (2 adresses × 0,3 s)
+
 ## Coût en tokens (mesuré le 18/10/2026)
 | Message | Prompt | Tokens |
 |---|---|---|
@@ -708,13 +726,14 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
 - [x] Sécurité : injection PowerShell corrigée (notification, voix, presse-papiers)
 - [x] Initiatives : briefing du jour au premier lancement + alertes d'emails
   importants (morning_briefing, 101e outil ; sans appel IA) ; météo en français
-- [x] .exe recompilé avec ces corrections (zip 185 Mo) : testé depuis le zip
-  décompressé dans un dossier vierge — écran de configuration en ~10 s,
-  entièrement visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
+- [x] Démarrage 2× plus rapide : edge_tts, groq, Playwright, PyMuPDF chargés
+  à la demande, identifiant machine calculé pendant les imports
+- [x] .exe recompilé avec ces corrections (zip 184 Mo) : testé depuis le zip
+  décompressé dans un dossier vierge — configuration en 1,7-5,3 s, fenêtre
+  principale en 2,6-3,9 s, briefing du jour OK, aucune erreur ; entièrement
+  visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
 
 ## Prochaines améliorations possibles
-- [ ] Démarrage du .exe (13 s) : charger OpenCV / Playwright / NumPy à la
-  demande plutôt qu'à l'ouverture de gui.py
 - [ ] Raccourcir le prompt système (~3 700 tokens/appel) : principal levier
   pour dépasser ~40 demandes avec outils par clé et par jour
 - [ ] agent.py : enchaîner plusieurs outils ("fais X puis Y") comme gui.py

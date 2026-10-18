@@ -9,10 +9,14 @@ from tkinter import scrolledtext, messagebox
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from groq import Groq
-from groq_client import GroqClient, repair_tool_use_failed
 from dotenv import load_dotenv
 
+# Identifiant machine de la licence (PowerShell, ~0,5 s) : calculé pendant les
+# imports qui suivent au lieu de les attendre
+from tools.license import prefetch_machine_id
+prefetch_machine_id()
+
+from groq_client import GroqClient, repair_tool_use_failed
 from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS, chat_messages
 from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
@@ -209,6 +213,7 @@ class AmahGUI:
         self._start_metrics()
         self._email_watcher = None
         self.root.after(1500, self._start_initiatives)
+        self.root.after(600, self._prewarm)
 
         # Auto-mute webcam (v1.5) : feedback visuel quand le son est coupe/retabli
         # automatiquement (callbacks declenches depuis le thread de surveillance)
@@ -612,6 +617,18 @@ class AmahGUI:
         self._write(("  Shift+Entrée = retour ligne  ·  ⚙ = liste outils  ·  [+] = fichier\n\n", "dim"))
         self._set_status("[OK] Pret")
         self._pulse_dot()
+
+    def _prewarm(self):
+        """Charge en arrière-plan ce qui a été retiré du démarrage (client Groq,
+        voix edge-tts) : le premier message n'attend pas ces imports."""
+        def run():
+            if getattr(self, "groq", None) is not None:
+                self.groq.warm_up()
+            try:
+                import edge_tts  # noqa: F401
+            except Exception:
+                pass
+        threading.Thread(target=run, name="amah-prechargement", daemon=True).start()
 
     # ── Initiatives (sans appel IA, aucun quota Groq consommé) ────────────────
 

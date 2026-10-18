@@ -1,4 +1,5 @@
-from playwright.sync_api import sync_playwright, BrowserContext, Page
+# Playwright (~0,3 s) est chargé à la première action du navigateur
+# (_ensure_browser), plus au démarrage d'Amah
 import atexit
 import functools
 import logging
@@ -11,8 +12,8 @@ from pathlib import Path
 log = logging.getLogger("amah.browser")
 
 _playwright = None
-_context: BrowserContext = None
-_page: Page = None
+_context = None   # playwright BrowserContext
+_page = None      # playwright Page
 
 _BASE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent.parent
 _PROFILE_DIR = str(_BASE / "browser_profile")
@@ -113,6 +114,7 @@ def _ensure_browser():
                 _context = None
         try:
             if _playwright is None:
+                from playwright.sync_api import sync_playwright
                 _playwright = sync_playwright().start()
             _context = _launch_context(_playwright)
             _page    = _context.pages[0] if _context.pages else _context.new_page()
