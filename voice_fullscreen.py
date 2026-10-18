@@ -4,7 +4,7 @@ Style : HUD futuriste / cyberpunk (hexagone central, grille, coins HUD)
 Lancement : py -3.13 voice_fullscreen.py
 Quitter   : dire "ferme" / "quitte" / "au revoir"  ou  Échap
 """
-import os, sys, json, math, random, time, threading, queue
+import os, re, sys, json, math, random, time, threading, queue
 from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
@@ -92,6 +92,23 @@ STOP_WORDS = {
     "ferme","quitte","quitter","stop","au revoir","aurevoir",
     "goodbye","bye","exit","close","arrete","arrête",
 }
+# La phrase ENTIÈRE doit être une demande de fermeture ("au revoir Amah",
+# "ferme-toi", "stop") : avant, un de ces mots n'importe où dans la phrase
+# fermait l'interface — "arrête la lecture", "ferme Chrome", "arrête la
+# musique" quittaient Amah au lieu d'agir (banc vocal du 18/10/2026).
+_QUIT_REQUEST = re.compile(
+    # Le prénom tel que Google le transcrit : "à ma", "Emma", "Hama"
+    r"^(?:(?:ok|bon|bien|merci|alors)\s+)*(?:(?:amah|ama|hama|emma|a\s+ma)\s+)?"
+    r"(?:ferme(?:\s+(?:toi|tout|l\s*interface|la\s+fenetre))?|quitte(?:\s+tout)?|quitter|"
+    r"au\s*revoir|bye(?:\s+bye)?|goodbye|exit|close|stop|arrete(?:\s+(?:tout|toi))?|"
+    r"a\s+bientot|bonne\s+nuit|c\s+est\s+tout\s+pour\s+(?:aujourd\s+hui|moi))"
+    r"(?:\s+(?:amah|ama|hama|emma|a\s+ma|merci|a\s+bientot))*$"
+)
+
+
+def _is_quit_request(text: str) -> bool:
+    from tools.tool_router import normalize
+    return bool(_QUIT_REQUEST.match(normalize(text)))
 
 MODEL_FAST  = "openai/gpt-oss-20b"       # questions simples sans outils (~300ms)
 MODEL_FULL  = "openai/gpt-oss-120b"      # requêtes avec outils (~1-2s)
@@ -673,7 +690,7 @@ class AmahVoiceUI:
         self._listening_active.set()
         try:
             with self._mic as src:
-                audio = self._sr.listen(src, timeout=5, phrase_time_limit=6)
+                audio = self._sr.listen(src, timeout=5, phrase_time_limit=12)
         except sr.WaitTimeoutError:
             return None   # rien dit dans le délai imparti
         finally:
@@ -741,7 +758,7 @@ class AmahVoiceUI:
         Groq + reponse parlee/affichee. Peut etre appele depuis _loop ou
         depuis un thread declenche par la saisie texte (Ctrl+T)."""
         # Fermeture vocale
-        if any(w in texte.lower() for w in STOP_WORDS):
+        if _is_quit_request(texte):
             self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
             self._tts.say("À bientôt.")
             time.sleep(0.3)

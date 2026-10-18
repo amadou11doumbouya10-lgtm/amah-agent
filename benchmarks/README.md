@@ -20,7 +20,7 @@ cas d'échec :
 | `benchmark_page_text.py` | Contenu principal des pages (sans menus ni bandeaux), découpage et arrêt de la lecture à voix haute. Attendu : 14/14. |
 | `benchmark_injection.py` | Aucun texte externe dans le code PowerShell (notification, repli vocal, presse-papiers). Attendu : 13/13. |
 | `benchmark_initiatives.py` | Emails importants, alertes (nouveaux emails seulement), briefing du jour. Attendu : 18/18. |
-| `benchmark_conversation.py` | Briques communes aux 3 interfaces (troncature, coupure de l'historique, texte pour la voix) et confirmations du terminal. Attendu : 15/15. |
+| `benchmark_conversation.py` | Briques communes aux 3 interfaces (troncature, coupure de l'historique, texte pour la voix), confirmations du terminal, et compréhension des transcriptions vocales réelles (mot de réveil, fermeture, calcul dicté). Attendu : 21/21. |
 | `benchmark_interfaces.py --sans-ia` | Les demandes qui ne doivent jamais appeler l'IA (heure, briefing, lecture, arrêt) dans les 3 interfaces. Attendu : 12/12. |
 
 Pour le routeur, n'ajoute pas un mot-clé juste pour faire passer une phrase du
@@ -39,6 +39,13 @@ motifs et donnaient 100 % alors que le routeur ratait 80 % des vraies demandes.
 
 Ils consomment le quota journalier (200 000 tokens par jour et par clé sur
 gpt-oss-120b, soit environ 40 demandes avec outils). Espace-les.
+
+**`benchmark_voice.py`** (réseau, **aucun appel Groq**) : 18 phrases dites par
+4 voix de synthèse (Henri, Denise, Hortense, Henri + bruit) passent par la
+reconnaissance Google des interfaces, puis on vérifie ce qu'Amah comprend.
+~3 minutes, ffmpeg requis pour les voix edge-tts. Mesuré le 18/10/2026 :
+réveil 7/8, interface vocale 64/64, bouton micro + terminal 60/60. Ne teste
+ni le micro réel, ni ta voix, ni le mode Live Gemini.
 
 **`benchmark_interfaces.py`** (sans option) est le test de référence de
 l'étape 1 du plan Amah Core : les mêmes 10 demandes envoyées à la fenêtre, à la

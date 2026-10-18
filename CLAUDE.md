@@ -135,11 +135,13 @@ py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique
 py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
 py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code PowerShell : 13/13
 py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
-py -3.13 -m benchmarks.benchmark_conversation  # briques communes + sécurité terminal : 15/15
+py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales : 21/21
 py -3.13 -m benchmarks.benchmark_interfaces --sans-ia   # 3 interfaces, demandes sans IA : 12/12
 # Avec appels IA (~150 000 tokens, à espacer) : les 3 interfaces sur 10 demandes,
 # test de référence du plan Amah Core (18/10 : 10/10, 10/10, 9/10)
 py -3.13 -m benchmarks.benchmark_interfaces
+# Réseau, 0 token Groq : compréhension vocale (voix de synthèse -> Google fr-FR)
+py -3.13 -m benchmarks.benchmark_voice
 ```
 
 ## Installation et lancement
@@ -482,6 +484,22 @@ n'est importé avant l'affichage — à garder ainsi (mesurer avec
 - Pas encore : rappel de mémoire "tu te souviens", briefing et alertes
   (prévus par l'étape 1 du plan Amah Core)
 - F11 : plein écran/fenêtré, Échap ou "ferme" : quitter
+
+### Compréhension vocale (testée le 18/10/2026, benchmark_voice)
+Toutes les entrées vocales utilisent la reconnaissance Google fr-FR :
+interface vocale (écoute de 12 s, 6 s avant), mot de réveil (3 s), bouton
+micro de la fenêtre et commande vocale du terminal (tools/voice_recognition,
+15 s). La reconnaissance est fiable (voix Henri, Denise, Hortense, avec bruit) ;
+les erreurs venaient de ce qu'Amah faisait du texte :
+- "Amah" est transcrit "Hama" (6 fois sur 8) : ajouté aux variantes du réveil
+- l'interface vocale se fermait si "arrête", "stop", "ferme"… apparaissait
+  n'importe où ("arrête la lecture", "ferme Chrome") : seule une phrase
+  entière d'au revoir ferme désormais (_is_quit_request, accepte "au revoir à
+  ma" / "Emma", transcriptions de "Amah")
+- "combien font douze fois quinze" est transcrit "combien font 12 x 15" :
+  calcul instantané élargi (combien font, fois, divisé par, expression
+  seule avec un vrai opérateur — jamais "30" ni "18/10/2026")
+Non testé : capture réelle du micro, ta voix et ton accent, mode Live Gemini.
 
 ### Mot de réveil "Amah" (amah_listener.py)
 - Widget discret en bas à droite, détection par distance de Levenshtein

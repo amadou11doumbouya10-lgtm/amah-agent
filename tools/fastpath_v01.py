@@ -61,8 +61,19 @@ _RESEARCH_QUERY_PATTERNS = [
 _CALCULATION_PREFIXES = [
     r"^calcule(?:[- ]moi)?(?:[- ]le)?\s+",
     r"^calcul\s+",
-    r"^combien fait\s+",
+    # "combien font 12 x 15" : transcription Google de "combien font douze fois quinze"
+    r"^combien (?:fait|font|ca fait|ca font)\s+",
+    r"^(?:ca fait|c est) combien\s+",
+    r"^(?:quel est le )?resultat de\s+",
     r"^fais le calcul de\s+",
+    r"^",                    # expression seule ("12 x 15") : _MATH_ALLOWED filtre le reste
+]
+# Opérateurs dits à voix haute (la reconnaissance vocale écrit "12 fois 15")
+_SPOKEN_OPERATORS = [
+    (r"\bmultiplie(?:s)? par\b|\bfois\b", "*"),
+    (r"\bdivise(?:s)? par\b|\bsur\b", "/"),
+    (r"\bplus\b", "+"),
+    (r"\bmoins\b", "-"),
 ]
 
 _MATH_ALLOWED = re.compile(r"^[0-9\s+\-*/().,%xX×÷]+$")
@@ -149,6 +160,9 @@ def _extract_calculation(text: str) -> Optional[str]:
             return None
 
         # Normalise les opérateurs écrits en langage courant.
+        expression = expression.rstrip(" ?.!=")
+        for spoken, symbol in _SPOKEN_OPERATORS:
+            expression = re.sub(r"(?<=\d)\s*(?:" + spoken + r")\s*(?=\d)", symbol, expression)
         expression = expression.replace("×", "*")
         expression = expression.replace("÷", "/")
         expression = re.sub(r"(?<=\d)\s*[xX]\s*(?=\d)", "*", expression)
@@ -160,6 +174,12 @@ def _extract_calculation(text: str) -> Optional[str]:
 
         # Pour V1, on refuse une expression ambiguë ou vide.
         if not re.search(r"\d", expression):
+            return None
+
+        # Expression seule, sans "calcule"/"combien font" : il faut un vrai
+        # opérateur, "/" et "-" entourés d'espaces — sinon "30" (réponse à une
+        # question d'Amah) ou "18/10/2026" (une date) passaient pour des calculs.
+        if pattern == r"^" and not re.search(r"\d\s*[*+]\s*\(?\d|\d\s[-/]\s\(?\d", expression):
             return None
 
         return expression

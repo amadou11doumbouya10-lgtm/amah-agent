@@ -70,5 +70,30 @@ check("terminal : suppression, envoi d'email, programme .exe -> autorisation",
 check("terminal : format C: toujours bloqué",
       authorize_tool("run_command", {"command": "format C:"}).level == "RESTRICTED")
 
+# 5. Compréhension vocale : transcriptions réelles de Google (banc vocal du
+#    18/10/2026, voix Henri / Denise / Hortense, avec et sans bruit)
+import amah_listener
+import voice_fullscreen
+from tools.fastpath_v01 import _extract_calculation, normalize_text
+
+listener = object.__new__(amah_listener.ListenerWidget)
+check("réveil : « Hama », « ama », « Hama quelle heure est-il » reconnus",
+      all(listener._is_wake(t.lower()) for t in ("Hama", "ama", "Hama quelle heure est-il")))
+check("réveil : « ami », « amour », « hamac » ignorés",
+      not any(listener._is_wake(t) for t in ("ami", "amour", "hamac")))
+quit_ok = ["au revoir Amah", "au revoir à ma", "au revoir Emma", "Amah, ferme-toi", "stop", "bonne nuit Amah"]
+quit_no = ["arrête la lecture", "ferme Chrome", "arrête la musique", "dis au revoir à Fatou",
+           "le magasin ferme à quelle heure ?", "stop le minuteur"]
+check("voix : « au revoir à ma », « ferme-toi », « stop »… ferment l'interface",
+      all(voice_fullscreen._is_quit_request(t) for t in quit_ok))
+check("voix : « arrête la lecture », « ferme Chrome »… ne la ferment plus",
+      not any(voice_fullscreen._is_quit_request(t) for t in quit_no))
+calc = {"combien font 12 x 15": "12*15", "combien fait 12 fois 15": "12*15", "12 x 15": "12*15",
+        "combien font 100 divisé par 4": "100/4"}
+check("calcul dicté (« combien font 12 x 15 »…) : réponse instantanée",
+      all(_extract_calculation(normalize_text(t)) == e for t, e in calc.items()))
+check("pas de calcul pour « 30 », « 18/10/2026 », un numéro de téléphone",
+      not any(_extract_calculation(normalize_text(t)) for t in ("30", "18/10/2026", "2026-10-18", "+224 611 76 85 52")))
+
 print(f"\n{sum(results)}/{len(results)} vérifications réussies")
 sys.exit(0 if all(results) else 1)

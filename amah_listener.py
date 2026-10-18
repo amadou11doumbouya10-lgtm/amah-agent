@@ -61,6 +61,9 @@ WAKE_WORDS = {
     "emma", "ema", "amor",
     "mah", "amah.",
     "hamah", "ah mah",
+    # Transcription Google la plus fréquente de "Amah" (banc vocal du
+    # 18/10/2026 : 6 fois sur 8 avec les voix Henri et Denise)
+    "hama", "hamma", "amma",
 }
 
 
