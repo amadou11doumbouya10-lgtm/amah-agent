@@ -58,11 +58,17 @@ CATEGORIES = {
         "noter oublie oublier preference prefere|sur moi|de moi|garde en|n oublie pas",
     ),
     "systeme": (
-        ("get_system_info", "list_processes", "get_network_info", "kill_process", "open_file", "run_command"),
+        ("get_system_info", "list_processes", "get_network_info", "kill_process", "open_file"),
         "systeme pc ordinateur ram cpu processeur disque windows processus process reseau ip "
         "configuration infos informations caracteristiques ferme fermer arrete arreter tue tuer "
-        "stoppe quitte rame lent consomme commande powershell cmd terminal execute executer "
-        "lance lancer ouvre ouvrir open demarre",
+        "stoppe quitte rame lent consomme lance lancer ouvre ouvrir open demarre",
+    ),
+    # run_command à part : proposé avec les outils système, le modèle préférait
+    # PowerShell à list_processes / get_system_info (et une confirmation inutile).
+    "commande": (
+        ("run_command",),
+        "commande commandes powershell cmd terminal execute executer ipconfig ping netstat "
+        "tasklist systeminfo|ligne de commande",
     ),
     "code": (
         ("write_code", "run_code", "explain_code", "write_file", "edit_file", "read_file"),

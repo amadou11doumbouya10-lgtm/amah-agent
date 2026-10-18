@@ -92,7 +92,7 @@ TOOLS_DEFINITIONS = [
     _f("get_system_info", "RAM/CPU/disque/OS"),
     _f("open_file",       "Ouvre fichier ou dossier Windows",   {"path": _s("chemin")}, ["path"]),
     _f("run_command",     "Execute commande PowerShell",        {"command": _s("commande")}, ["command"]),
-    _f("list_processes",  "Liste processus actifs par CPU",     {"top": _i("nb")}),
+    _f("list_processes",  "Liste processus actifs tries par CPU ou par memoire RAM", {"top": _i("nb"), "sort_by": _s("cpu (defaut) ou ram")}),
     _f("get_network_info","IP locale et connexion internet"),
     _f("kill_process",    "Termine un processus par nom ou PID (protege les processus systeme critiques)", {"name": _s("nom du processus ex: chrome.exe"), "pid": _i("PID du processus")}, []),
     # Memoire

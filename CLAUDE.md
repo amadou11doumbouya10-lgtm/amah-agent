@@ -247,7 +247,7 @@ zip_files(files, output), unzip_file(path, destination), list_archive(path)
 ### Images/Réseau — tools/image_tool.py (6)
 screenshot_full(path), resize_image(path, width, height),
 get_image_info(path), convert_image(path, format),
-list_processes(top), get_network_info()
+list_processes(top, sort_by="cpu"|"ram"), get_network_info()
 
 ### Météo — tools/meteo.py (2)
 get_weather(location), get_weather_simple(location)
@@ -572,8 +572,15 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   1.5.2, traduction de repli par IA, Excel/Word/PDF lisibles par read_file
 - [x] Bug gui.py corrigé : toute erreur Groq s'affichait en "cannot access
   local variable 'repair_tool_use_failed'" (import local, depuis 9fe1cc1)
-- [ ] Refaire la série complète de scénarios gui.py (interrompue par le quota
-  journalier Groq le 14/10)
+- [x] Série complète de 26 scénarios sur gui.py (18/10) : 24/26 au premier
+  passage, les 2 échecs corrigés puis revalidés :
+  - rappel de mémoire : quand le résumé LLM échoue (mode `summary_error`, ex.
+    limite Groq), memory_context.py transmet les extraits bruts de
+    l'historique au lieu de laisser le modèle répondre "aucune note"
+  - processus : `run_command` sorti de la catégorie "systeme" du routeur
+    (catégorie "commande" à part) ; list_processes trie par CPU ou RAM
+    (`sort_by`), mesure le CPU sur 0,5 s (psutil renvoyait 0 % partout au
+    premier appel, le tri était arbitraire) et donne la RAM en Mo
 - [x] Rangement : benchmarks dans benchmarks/ (+ benchmark_tool_router et
   benchmark_guard, sans appel IA), sauvegardes / ~24 tools/*_v0x morts /
   benchmarks cassés dans archives/ (gitignoré)

@@ -105,29 +105,49 @@ def convert_image(path: str, to_format: str, output: str = None) -> dict:
         return {"error": str(e)}
 
 
-def list_processes(top: int = 15) -> dict:
-    """Liste les processus Windows actifs triés par utilisation CPU."""
+def list_processes(top: int = 15, sort_by: str = "cpu") -> dict:
+    """Liste les processus Windows actifs triés par CPU (défaut) ou par mémoire (sort_by="ram")."""
     try:
+        import time
         import psutil
-        procs = []
-        for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+        by_ram = str(sort_by or "").lower() in ("ram", "memoire", "mémoire", "memory", "mem")
+        procs = [p for p in psutil.process_iter(['pid', 'name', 'memory_info']) if p.pid != 0]
+
+        # psutil renvoie 0 % au premier appel de cpu_percent : sans mesure sur un
+        # intervalle, le tri "par CPU" était arbitraire.
+        if not by_ram:
+            for p in procs:
+                try:
+                    p.cpu_percent(None)
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
+        cores = psutil.cpu_count() or 1
+        rows = []
+        for p in procs:
             try:
-                procs.append(p.info)
+                mem = p.info.get('memory_info')
+                rows.append({
+                    "pid": p.pid,
+                    "nom": p.info.get('name') or "?",
+                    "_cpu": 0.0 if by_ram else p.cpu_percent(None) / cores,
+                    "_ram": mem.rss if mem else 0,
+                })
             except Exception:
                 pass
 
-        # Tri par CPU puis mémoire
-        procs.sort(key=lambda x: (x.get('cpu_percent') or 0), reverse=True)
+        rows.sort(key=lambda r: r["_ram"] if by_ram else r["_cpu"], reverse=True)
         top_procs = [
             {
-                "pid":    p['pid'],
-                "nom":    p['name'],
-                "cpu":    f"{p.get('cpu_percent', 0):.1f}%",
-                "ram":    f"{p.get('memory_percent', 0):.1f}%",
+                "pid": r["pid"],
+                "nom": r["nom"],
+                **({} if by_ram else {"cpu": f"{r['_cpu']:.1f}%"}),
+                "ram": f"{r['_ram'] / 1024 / 1024:.0f} Mo",
             }
-            for p in procs[:top]
+            for r in rows[:int(top)]
         ]
-        return {"success": True, "total": len(procs), "top": top_procs}
+        return {"success": True, "tri": "ram" if by_ram else "cpu", "total": len(rows), "top": top_procs}
     except Exception as e:
         return {"error": str(e)}
 

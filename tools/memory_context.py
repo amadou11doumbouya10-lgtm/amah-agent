@@ -181,13 +181,29 @@ def memory_context(
         note(f"[MEMORY] mixed=True | cache=False | llm=False | history_not_found | {elapsed():.1f} ms")
         return None, False
 
-    result = recall(query=user_text, summarize_fn=summarize_fn, limit=6)
+    try:
+        result = recall(query=user_text, summarize_fn=summarize_fn, limit=6)
+    except Exception as exc:
+        # Le résumé demande un appel LLM : sous quota tendu (429) il échoue.
+        note(f"[MEMORY] résumé impossible ({type(exc).__name__}) | {elapsed():.1f} ms")
+        result = {}
     mode = result.get("mode", "unknown")
-    note(
-        f"[MEMORY] mode={mode} | cache={result.get('cached', False)} "
-        f"| llm={result.get('used_llm', False)} | {elapsed():.1f} ms"
-    )
-    return result, mode in DIRECT_MODES
+    if result:
+        note(
+            f"[MEMORY] mode={mode} | cache={result.get('cached', False)} "
+            f"| llm={result.get('used_llm', False)} | {elapsed():.1f} ms"
+        )
+    if mode in DIRECT_MODES:
+        return result, True
+
+    # Pas de résumé exploitable : donner au modèle les extraits bruts de
+    # l'historique plutôt que le laisser répondre "aucune note" alors que la
+    # conversation existe (constaté sous limite Groq pendant les tests).
+    history_sources = sources_memory_for_mixed_query(extract_memory_query(user_text))
+    if history_sources:
+        note(f"[MEMORY] repli sur les sources brutes | {len(history_sources['sources'])} extrait(s)")
+        return history_sources, False
+    return (result or None), False
 
 
 def format_history_sources(result: dict) -> str:
