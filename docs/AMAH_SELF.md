@@ -12,7 +12,7 @@ Playwright (navigateur), openpyxl (Excel), python-docx/fpdf2 (documents),
 PyMuPDF (PDF), psutil (systeme). **Pas de TensorFlow/PyTorch/CNN/RNN/modele
 entraine en local** — toute l'"intelligence" vient des appels API Groq/Gemini.
 
-## Les 99 outils (par categorie)
+## Les 100 outils (par categorie)
 - Fichiers (12) : list_files, organize_folder, find_files, move_file,
   create_folder, read_file, write_file, edit_file, edit_pdf, get_folder_info,
   delete_file, summarize
@@ -23,7 +23,7 @@ entraine en local** — toute l'"intelligence" vient des appels API Groq/Gemini.
 - Email (4) : read_emails, send_email, search_emails, draft_email
 - Navigateur (7) : open_browser, click_element, fill_form, take_screenshot,
   get_page_text, click_text, type_in_field
-- Voix (1) : speak
+- Voix (2) : speak, read_aloud (lit une page web entiere a voix haute)
 - Notifications (2) : send_notification, set_reminder
 - Excel (3) : read_excel, create_excel, append_to_excel
 - Presse-papiers (2) : read_clipboard, write_clipboard

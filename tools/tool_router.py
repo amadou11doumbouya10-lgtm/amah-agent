@@ -102,6 +102,13 @@ CATEGORIES = {
         "voix ecoute micro microphone notification notifie alerte rappel rappelle "
         "previens prevenir minutes reveille|a voix haute|ecoute moi",
     ),
+    "lecture": (
+        ("read_aloud", "get_page_text", "read_webpage", "open_browser"),
+        # Des phrases seulement : "lis" seul viserait aussi "lis mes emails"
+        "lecture|a voix haute|a haute voix|lis moi|lis la page|lis cette page|lis l article|"
+        "lis cet article|lire la page|lire l article|arrete de lire|arrete la lecture|"
+        "stop la lecture|stoppe la lecture",
+    ),
     "images": (
         ("resize_image", "convert_image", "get_image_info", "screenshot_full"),
         "image images photo photos redimensionne redimensionner reduis reduire agrandis "
@@ -208,6 +215,8 @@ def forced_tool(text: str, tools: list, info: dict = None):
     web_search est imposé quand la question porte sur une information qui
     change (actualité, modèles, prix...) ET qu'aucun outil précis n'est visé :
     "lis mes 3 derniers emails" reste sur read_emails.
+    (Pas read_aloud : gpt-oss ignore tool_choice=read_aloud, réessaie
+    open_browser et Groq rejette en 400 — voir read_aloud_reply, instant.py.)
     """
     if info is None:
         _tools, info = select_tools(text, [t for t in tools])
@@ -272,7 +281,10 @@ def _category_hits(norm: str, raw: str) -> dict:
     for cat in CATEGORIES:
         count = len((known | corrected) & _CAT_WORDS[cat])
         padded = f" {norm} "
-        count += sum(1 for phrase in _CAT_PHRASES[cat] if f" {phrase} " in padded)
+        # Une expression ("a voix haute", "piece jointe") est plus précise qu'un
+        # mot seul : poids double ("lis-moi l'article <url>" perdait read_aloud
+        # derrière les outils fichiers, déclenchés par "lis")
+        count += sum(2 for phrase in _CAT_PHRASES[cat] if f" {phrase} " in padded)
         if count:
             hits[cat] = count
     for ext in re.findall(r"\.([a-z0-9]{2,4})\b", raw.lower()):

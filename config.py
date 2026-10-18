@@ -45,8 +45,8 @@ CHAT_SYSTEM_PROMPT = (
     "precise et efficace. Tu parles francais et tu tutoies l'utilisateur."
     + (f" Il s'appelle {_PRENOM}." if _PRENOM else "") + "\n"
     "Tes reponses sont souvent lues a voix haute : phrases courtes et naturelles, sans markdown.\n"
-    "Tu sais agir sur le PC grace a 99 outils : fichiers et documents (Word, PDF, Excel), "
-    "emails Gmail, recherche web et navigateur, meteo, traduction, systeme et materiel "
+    "Tu sais agir sur le PC grace a 100 outils : fichiers et documents (Word, PDF, Excel), "
+    "emails Gmail, recherche web et navigateur, lecture de pages a voix haute, meteo, traduction, systeme et materiel "
     "(volume, luminosite, wifi), vision de l'ecran et webcam, musique et YouTube, jeux "
     "Steam/Epic, rappels et taches planifiees, memoire des conversations, QR codes, archives. "
     "Pour une action, l'utilisateur n'a qu'a la demander.\n"
@@ -113,7 +113,7 @@ TOOLS_DEFINITIONS = [
     _f("read_document",   "Lit Word/PDF/TXT",                   {"path": _s("chemin")}, ["path"]),
     # Recherche
     _f("web_search",      "Recherche DuckDuckGo",               {"query": _s("requete"), "num_results": _i("nb resultats")}, ["query"]),
-    _f("read_webpage",    "Lit texte d'une page web",           {"url": _s("url")}, ["url"]),
+    _f("read_webpage",    "Lit le contenu principal d'une page web (sans menus)", {"url": _s("url")}, ["url"]),
     # Systeme
     _f("get_system_info", "RAM/CPU/disque/OS"),
     _f("open_file",       "Ouvre fichier ou dossier Windows",   {"path": _s("chemin")}, ["path"]),
@@ -135,11 +135,13 @@ TOOLS_DEFINITIONS = [
     _f("click_element",   "Clique element de la page",          {"selector": _s("selecteur CSS")}, ["selector"]),
     _f("fill_form",       "Remplit champ formulaire",           {"selector": _s("selecteur"), "value": _s("valeur")}, ["selector","value"]),
     _f("take_screenshot", "Capture ecran navigateur",           {"path": _s("chemin")}),
-    _f("get_page_text",   "Lit texte de la page ouverte"),
+    _f("get_page_text",   "Lit le contenu principal de la page ouverte (sans menus)"),
     _f("click_text",      "Clique sur un element par son texte visible (bouton, lien...) -- pas de selecteur CSS requis", {"text": _s("texte visible de l'element a cliquer")}, ["text"]),
     _f("type_in_field",   "Ecrit du texte dans un champ par son label/placeholder -- pas de selecteur CSS requis", {"label": _s("label, placeholder ou nom du champ"), "text": _s("texte a saisir")}, ["label","text"]),
     # Voix
     _f("speak",           "Parle a voix haute",                 {"text": _s("texte"), "speed": _i("vitesse")}, ["text"]),
+    _f("read_aloud",      "Lit A VOIX HAUTE tout l'article d'une page web, en entier et en arriere-plan (pas de resume). stop=true arrete la lecture",
+       {"url": _s("adresse de la page ; vide = page ouverte dans le navigateur"), "stop": _b("true pour arreter la lecture")}),
     _f("listen",          "Ecoute microphone",                  {"timeout": _i("secondes"), "language": _s("langue")}),
     _f("listen_continuous","Ecoute microphone X secondes",      {"duration": _i("secondes"), "language": _s("langue")}),
     # Notifications

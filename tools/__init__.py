@@ -18,6 +18,7 @@ _TOOL_MODULES = [
     ("tools.email_tool", ["read_emails", "send_email", "search_emails", "draft_email"]),
     ("tools.browser", ["open_browser", "click_element", "fill_form", "take_screenshot", "get_page_text", "click_text", "type_in_field"]),
     ("tools.voice", ["speak"]),
+    ("tools.reader", ["read_aloud"]),
     ("tools.notifications", ["send_notification", "set_reminder"]),
     ("tools.excel", ["read_excel", "create_excel", "append_to_excel"]),
     ("tools.clipboard", ["read_clipboard", "write_clipboard"]),

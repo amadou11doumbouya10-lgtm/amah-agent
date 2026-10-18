@@ -50,7 +50,7 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 | 🌍 **Navigateur** | Profil persistant (cookies/connexions conservées), clic/formulaire/screenshot, navigation par texte visible (`click_text`, `type_in_field`) sans sélecteur CSS |
 | 🎙️ **Interface vocale** | HUD animé style Amah — parle, Amah répond à voix haute |
 | 🗣️ **Mode Live (Gemini)** | Conversation orale temps réel (F9), interruption naturelle, 33 outils vocaux |
-| 🔊 **Voix** | Synthèse vocale Windows + reconnaissance micro |
+| 🔊 **Voix** | Synthèse vocale + reconnaissance micro + lecture complète d'une page web à voix haute |
 | 📊 **Excel** | Lire, créer, modifier des fichiers Excel |
 | 🧠 **Mémoire** | Se souvenir entre les sessions (SQLite) |
 | 🔔 **Notifications** | Alertes Windows + rappels programmés |
@@ -69,7 +69,7 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 | 🎮 **Jeux** | Lancer/installer/chercher des jeux Steam, ouvrir Epic Games |
 | 📷 **Vision webcam** | Analyser l'image webcam par IA + auto-mute confidentialité (coupe le son si plusieurs personnes détectées) |
 
-**Total : 99 outils opérationnels.**
+**Total : 100 outils opérationnels.**
 
 ---
 
@@ -152,7 +152,7 @@ amah-agent/
 ├── system_prompt.txt         ← Texte du prompt système (éditable sans toucher au code)
 ├── docs/AMAH_SELF.md          ← Fiche condensée d'auto-connaissance (architecture, outils, roadmap)
 ├── tools/
-│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (99 outils, génération dynamique)
+│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (100 outils, génération dynamique)
 │   ├── files.py              ← Fichiers/dossiers (12 outils)
 │   ├── documents.py          ← Word, PDF, TXT (4 outils)
 │   ├── search.py             ← DuckDuckGo + lecture web (2 outils)

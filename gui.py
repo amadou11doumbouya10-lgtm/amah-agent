@@ -145,6 +145,19 @@ def _log_error(context: str, exc: BaseException) -> None:
         pass
 
 
+# Pages web : 4 000 caractères pour pouvoir résumer un article (les 2 000
+# premiers ne contiennent souvent que le chapeau) ; le reste : 2 000.
+_LONG_RESULT_TOOLS = {"get_page_text", "read_webpage"}
+
+
+def _clip_result(tool_name, result: str) -> str:
+    """Tronque un résultat d'outil avant de l'envoyer au modèle (tokens)."""
+    limit = 4000 if resolve_tool_name(tool_name) in _LONG_RESULT_TOOLS else 2000
+    if len(result) > limit:
+        return result[:limit] + "\n...[tronqué pour économiser les tokens]"
+    return result
+
+
 def _fit_window(root, width: int, height: int) -> int:
     """Taille réduite à l'écran puis fenêtre centrée ; renvoie la hauteur retenue.
 
@@ -926,6 +939,9 @@ class AmahGUI:
 
     def _speak_reply(self, text: str):
         """Fait parler Amah après une interaction vocale (200 premiers chars)."""
+        reader = sys.modules.get("tools.reader")
+        if reader is not None and reader.is_reading():
+            return      # une page est lue à voix haute : pas deux voix à la fois
         try:
             from tools.voice import speak
             short = text[:220].replace("\n", " ")
@@ -1048,9 +1064,7 @@ class AmahGUI:
             "tool_calls": [{"id": tc.id, "type": "function",
                             "function": {"name": name, "arguments": tc.function.arguments}}],
         })
-        result = self._execute_tool(tc)
-        if len(result) > 2000:
-            result = result[:2000] + "\n...[tronqué pour économiser les tokens]"
+        result = _clip_result(name, self._execute_tool(tc))
         self.messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
         self._trim_messages()
         return self._groq_call(self.messages, tools=TOOLS_DEFINITIONS, model_override=MODEL)
@@ -1273,11 +1287,9 @@ class AmahGUI:
             self.messages.append(msg_dict)
 
             for tc in msg.tool_calls:
-                result = self._execute_tool(tc)
                 # Tronque les résultats trop longs pour économiser les tokens
                 # (emails, fichiers, pages web peuvent faire des milliers de tokens)
-                if len(result) > 2000:
-                    result = result[:2000] + "\n...[tronqué pour économiser les tokens]"
+                result = _clip_result(tc.function.name, self._execute_tool(tc))
                 self.messages.append({
                     "role":         "tool",
                     "tool_call_id": tc.id,
@@ -1286,7 +1298,7 @@ class AmahGUI:
 
             self._trim_messages()
             # Reutilise la sous-liste d'outils ciblee (et non TOOLS_DEFINITIONS,
-            # ~4200 tokens pour les 99 outils) pour eviter de depasser le TPM
+            # ~4200 tokens pour les 100 outils) pour eviter de depasser le TPM
             # Groq (12000) sur les enchainements multi-outils -- avec repli sur
             # la liste complete si le modele reclame un outil hors de cette sous-liste.
             try:
@@ -1337,9 +1349,7 @@ class AmahGUI:
                     id="txt-repair-0",
                     function=SimpleNamespace(name=_tname, arguments=_targs),
                 )
-                _res = self._execute_tool(_fake)
-                if len(_res) > 2000:
-                    _res = _res[:2000] + "\n...[tronqué]"
+                _res = _clip_result(_tname, self._execute_tool(_fake))
                 self.messages.append({
                     "role": "assistant", "content": "",
                     "tool_calls": [{"id": "txt-repair-0", "type": "function",

@@ -100,6 +100,10 @@ REGRESSIONS = {
  "quelle est la dernière version de Python sortie ?": "web_search",
  "quel est le prix du bitcoin aujourd'hui": "web_search",
  "les nouveautés de Windows 11": "web_search",
+ # "lis" déclenchait aussi les outils fichiers : read_aloud sortait des 12
+ "lis-moi l'article https://fr.wikipedia.org/wiki/Conakry": "read_aloud",
+ "peux-tu me lire la page ouverte": "read_aloud",
+ "arrête la lecture": "read_aloud",
 }
 
 

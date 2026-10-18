@@ -1,7 +1,11 @@
 from playwright.sync_api import sync_playwright, BrowserContext, Page
 import atexit
+import functools
 import logging
+import queue
 import sys
+import threading
+from concurrent.futures import Future
 from pathlib import Path
 
 log = logging.getLogger("amah.browser")
@@ -19,8 +23,50 @@ _PROFILE_DIR = str(_BASE / "browser_profile")
 # (CAPTCHA) sur toute recherche faite via Playwright.
 _LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 
+# Playwright (API synchrone) refuse qu'un autre fil utilise le navigateur qu'il
+# a ouvert : gui.py traite chaque message dans un nouveau fil, donc "ouvre X"
+# marchait puis "lis la page" échouait au message suivant ("cannot switch to
+# a different thread"). Toutes les actions passent par ce fil unique.
+_jobs: "queue.Queue" = queue.Queue()
+_worker = None
+_worker_lock = threading.Lock()
+
+
+def _browser_worker():
+    while True:
+        fn, args, kwargs, future = _jobs.get()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as exc:
+            future.set_exception(exc)
+
+
+def _on_browser_thread(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        global _worker
+        if threading.current_thread() is _worker:
+            return fn(*args, **kwargs)
+        with _worker_lock:
+            if _worker is None or not _worker.is_alive():
+                _worker = threading.Thread(target=_browser_worker, name="amah-browser", daemon=True)
+                _worker.start()
+        future = Future()
+        _jobs.put((fn, args, kwargs, future))
+        return future.result(timeout=180)
+    return wrapper
+
 
 def _close_browser():
+    if _worker is None or not _worker.is_alive():
+        return
+    try:
+        _on_browser_thread(_close_browser_now)()
+    except Exception as e:
+        log.debug(f"Fermeture du navigateur ignoree : {e}")
+
+
+def _close_browser_now():
     global _context, _playwright
     try:
         if _context:
@@ -81,6 +127,7 @@ def _ensure_browser():
     return _page
 
 
+@_on_browser_thread
 def open_browser(url: str) -> dict:
     try:
         page = _ensure_browser()
@@ -91,6 +138,7 @@ def open_browser(url: str) -> dict:
         return {"error": str(e)}
 
 
+@_on_browser_thread
 def click_element(selector: str) -> dict:
     try:
         page = _ensure_browser()
@@ -101,6 +149,7 @@ def click_element(selector: str) -> dict:
         return {"error": str(e)}
 
 
+@_on_browser_thread
 def fill_form(selector: str, value: str) -> dict:
     try:
         page = _ensure_browser()
@@ -110,6 +159,7 @@ def fill_form(selector: str, value: str) -> dict:
         return {"error": str(e)}
 
 
+@_on_browser_thread
 def take_screenshot(path: str = None) -> dict:
     try:
         from pathlib import Path
@@ -125,6 +175,7 @@ def take_screenshot(path: str = None) -> dict:
         return {"error": str(e)}
 
 
+@_on_browser_thread
 def click_text(text: str) -> dict:
     """Clique sur l'element (bouton, lien, texte) correspondant au texte visible donne -- pas besoin de selecteur CSS."""
     try:
@@ -149,6 +200,7 @@ def click_text(text: str) -> dict:
         return {"error": str(e)}
 
 
+@_on_browser_thread
 def type_in_field(label: str, text: str) -> dict:
     """Ecrit du texte dans un champ identifie par son label/placeholder/nom -- pas besoin de selecteur CSS."""
     try:
@@ -178,12 +230,54 @@ def type_in_field(label: str, text: str) -> dict:
         return {"error": str(e)}
 
 
+def _main_text(page) -> dict:
+    """Contenu principal de la page (article), sans menus ni bandeaux."""
+    from tools.page_text import extract_main_text
+    result = extract_main_text(page.content())
+    if len(result["texte"]) < 200:
+        body = page.inner_text("body")
+        if len(body) > len(result["texte"]):
+            result["texte"] = body
+    return {"url": page.url, "titre": result["titre"] or page.title(), "texte": result["texte"]}
+
+
+@_on_browser_thread
 def get_page_text() -> dict:
     try:
         page = _ensure_browser()
-        text = page.inner_text("body")
-        if len(text) > 5000:
-            text = text[:5000] + "\n\n[... tronqué ...]"
-        return {"success": True, "url": page.url, "titre": page.title(), "texte": text}
+        data = _main_text(page)
+        text, total = data["texte"], len(data["texte"])
+        if total > 8000:
+            text = text[:8000] + "\n\n[... tronqué ...]"
+        return {"success": True, "url": data["url"], "titre": data["titre"],
+                "texte": text, "longueur_totale": total}
     except Exception as e:
         return {"error": str(e)}
+
+
+@_on_browser_thread
+def current_page_main_text():
+    """Texte complet de la page déjà ouverte, ou None si aucune page n'est
+    ouverte (n'ouvre pas de navigateur). Utilisé par read_aloud."""
+    if _page is None:
+        return None
+    try:
+        if _page.is_closed() or _page.url in ("", "about:blank"):
+            return None
+        return _main_text(_page)
+    except Exception:
+        return None
+
+
+@_on_browser_thread
+def open_and_read(url: str) -> dict:
+    """Ouvre l'URL dans le navigateur et renvoie son texte complet : pour les
+    sites qui refusent les requêtes simples (403) ou se construisent en JavaScript."""
+    page = _ensure_browser()
+    page.goto(url, timeout=20000)
+    page.wait_for_load_state("domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    return _main_text(page)

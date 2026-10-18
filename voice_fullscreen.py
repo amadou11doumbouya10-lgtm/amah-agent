@@ -19,7 +19,7 @@ load_dotenv(_env)
 from tools.voice import speak
 from tools import TOOL_FUNCTIONS
 from tools.updater import CURRENT_VERSION
-from tools.tool_router import select_tools
+from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS, chat_messages
@@ -58,6 +58,12 @@ DIM       = "#1a2535"
 TEXT_BODY = "#a0c8e0"
 
 LIVE_COLOR = "#b388ff"   # violet -- mode Live Gemini
+
+def _reading_aloud() -> bool:
+    """Une page est-elle en cours de lecture (outil read_aloud) ?"""
+    reader = sys.modules.get("tools.reader")   # pas importé = rien n'est lu
+    return reader is not None and reader.is_reading()
+
 
 STATES = {
     "IDLE":   (CYAN_DIM,  "AMAH  ·  EN ATTENTE"),
@@ -307,7 +313,7 @@ class AmahVoiceUI:
         self.root.lift()
         self.root.focus_force()
         self.root.after(300, lambda: self.root.attributes("-topmost", False))
-        self.root.bind("<Escape>", lambda e: self._quit())
+        self.root.bind("<Escape>", lambda e: self._on_escape())
         self.root.bind("<F11>",    lambda e: self._toggle_fs())
         self.root.bind("<F9>",     lambda e: self._toggle_live())
         # F9 est souvent une touche multimedia (volume/luminosite) sur les
@@ -700,10 +706,24 @@ class AmahVoiceUI:
             return
 
         self.root.after(0, self._set_state, "ECOUTE")
+        was_reading = False
         while self._running:
             if self._live_mode:
                 time.sleep(0.2)
                 continue
+
+            # Lecture d'une page à voix haute (read_aloud) : le micro
+            # entendrait Amah et prendrait sa voix pour une demande
+            if _reading_aloud():
+                if not was_reading:
+                    was_reading = True
+                    self.root.after(0, self._set_state, "REPOND", "", "",
+                                    "LECTURE  ·  ÉCHAP POUR ARRÊTER")
+                time.sleep(0.3)
+                continue
+            if was_reading:
+                was_reading = False
+                self.root.after(0, self._set_state, "ECOUTE")
 
             texte = self._listen_once()
             if not texte:
@@ -765,7 +785,9 @@ class AmahVoiceUI:
             # speak() est bloquant : on attend la fin réelle de la voix
             # au lieu d'estimer une durée, et on affiche l'erreur si la
             # synthèse échoue plutôt que de l'avaler en silence.
-            voice_res = self._tts.say(reply[:450])
+            # Pendant une lecture à voix haute : réponse affichée seulement,
+            # sinon les deux voix parlent en même temps.
+            voice_res = {} if _reading_aloud() else self._tts.say(reply[:450])
             if "error" in voice_res:
                 self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
                                 f"Voix indisponible : {voice_res['error'][:120]}")
@@ -788,6 +810,10 @@ class AmahVoiceUI:
 
         tools = _select_tools(text)
         model = MODEL_FULL if tools else MODEL_FAST
+        # Outil imposé au premier appel seulement : actualité -> web_search,
+        # "lis cette page à voix haute" -> read_aloud (comme gui.py et agent.py)
+        forced = forced_tool(text, tools) if tools else None
+        pending_choice = [{"type": "function", "function": {"name": forced}}] if forced else []
 
         def _on_status(txt):
             # Affiche les messages de rotation/attente (limite Groq) dans la
@@ -797,6 +823,7 @@ class AmahVoiceUI:
         def _call(msgs, tl):
             return self.client.chat(
                 messages=msgs, model=model, tools=tl,
+                tool_choice=pending_choice.pop() if pending_choice else None,
                 max_tokens=4096, temperature=0.4,
                 on_status=_on_status,
             )
@@ -1137,8 +1164,17 @@ class AmahVoiceUI:
         fs = self.root.attributes("-fullscreen")
         self.root.attributes("-fullscreen", not fs)
 
+    def _on_escape(self):
+        """Échap : arrête d'abord une lecture à voix haute, sinon quitte."""
+        if _reading_aloud():
+            threading.Thread(target=sys.modules["tools.reader"].stop_reading, daemon=True).start()
+            return
+        self._quit()
+
     def _quit(self):
         self._running = False
+        if _reading_aloud():
+            sys.modules["tools.reader"].stop_reading()
         self._webcam_active.clear()
         if self._live_session:
             self._live_session.stop()

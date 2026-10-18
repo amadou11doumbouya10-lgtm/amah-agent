@@ -1,13 +1,13 @@
 # Amah Agent — Toutes les capacités (v1.5.0)
 
-> **99 outils réels** • Fonctionne hors ligne (sauf IA/web/email) • Windows 11 • Mis à jour le 11/06/2026
+> **100 outils réels** • Fonctionne hors ligne (sauf IA/web/email) • Windows 11 • Mis à jour le 11/06/2026
 
 ---
 
 ## Vue d'ensemble
 
 Amah Agent est une assistante IA locale qui s'exécute directement sur ton PC Windows.
-Elle comprend le français naturel et peut agir sur ton ordinateur via 99 outils réels,
+Elle comprend le français naturel et peut agir sur ton ordinateur via 100 outils réels,
 regroupés en 24 catégories. Depuis la v1.5, elle dispose aussi d'un **mode Live**
 (Gemini) pour une conversation vocale en temps réel, comme un appel téléphonique.
 
@@ -165,11 +165,12 @@ Amah se souvient d'informations entre les sessions.
 
 ---
 
-## 11. Voix et Interface Plein Écran — 3 outils + 2 interfaces
+## 11. Voix et Interface Plein Écran — 4 outils + 2 interfaces
 
 | Outil | Ce qu'il fait | Exemple |
 |---|---|---|
 | `speak` | Lit un texte à voix haute | *"Dis-moi la météo à voix haute"* |
+| `read_aloud` | Lit une page web en entier à voix haute (article seul, sans menus), en arrière-plan | *"Lis-moi à voix haute l'article https://…"* puis *"Arrête la lecture"* |
 | `listen` | Écoute le microphone et transcrit | *"Écoute ce que je dis"* |
 | `listen_continuous` | Écoute pendant X secondes | *"Enregistre ce que je dis pendant 30 secondes"* |
 
@@ -369,7 +370,7 @@ Amah peut voir via la webcam — désactivé par défaut pour la vie privée.
 | YouTube et musique | 3 |
 | Vols et voyages | 1 |
 | Mémoire persistante | 3 |
-| Voix | 3 |
+| Voix | 4 |
 | Notifications et rappels | 2 |
 | Excel | 3 |
 | Utilitaires (calcul, zip, presse-papiers…) | 10 |

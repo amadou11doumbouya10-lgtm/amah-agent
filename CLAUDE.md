@@ -2,7 +2,7 @@
 
 ## Présentation
 Agent IA local sur PC Windows. Cerveau : Groq (gpt-oss-120b / gpt-oss-20b,
-gratuit) + mode vocal temps réel Gemini Live. 99 outils réels.
+gratuit) + mode vocal temps réel Gemini Live. 100 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
 Version actuelle : **v1.5.2** (source unique : `CURRENT_VERSION` dans tools/updater.py)
@@ -39,7 +39,7 @@ amah-agent/
 ├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
 ├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
-│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (99 outils) : registre qui
+│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (100 outils) : registre qui
 │   │                            corrige les noms gpt-oss, garde-fou + statistiques
 │   │   ── Pipeline partagé (gui.py, voice_fullscreen.py, agent.py) ──
 │   ├── tool_router.py        ← Routeur d'outils unique (4 niveaux, 0 à 12 outils)
@@ -120,10 +120,11 @@ amah-agent/
 
 ## Vérifications après chaque modification (sans appel IA)
 ```bash
-py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 40/40 + 55/55 + 3/3 attendu
+py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 40/40 + 55/55 + 6/6 attendu
 py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
 py -3.13 -m benchmarks.benchmark_license       # licences : 11/11 attendu
 py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique : 11/11
+py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
 ```
 
 ## Installation et lancement
@@ -205,7 +206,7 @@ Llama 3.3 70B, Llama 3.1 8B et llama-4-scout ont été retirés par Groq (404).
    - Tester sur des phrases DIFFÉRENTES des mots-clés : les anciens benchmarks
      reprenaient les phrases des motifs et mesuraient la mémorisation
 
-## Les 99 outils
+## Les 100 outils
 ### Fichiers — tools/files.py (12)
 list_files, organize_folder, find_files, move_file, create_folder, read_file,
 write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
@@ -214,7 +215,8 @@ write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
 create_word, create_txt, create_pdf, read_document
 
 ### Recherche — tools/search.py (2)
-web_search (DuckDuckGo + cache LRU 10min), read_webpage
+web_search (DuckDuckGo + cache LRU 10min), read_webpage (contenu principal,
+6 000 caractères ; pages compressées gzip décodées)
 
 ### Système — tools/system.py (4)
 get_system_info, open_file, run_command (PowerShell filtré par expressions
@@ -234,9 +236,36 @@ Lecture en BODY.PEEK[] : ne marque pas les emails comme lus.
 open_browser(url), click_element(selector), fill_form(selector, value),
 take_screenshot(path), get_page_text(), click_text(texte), type_in_field(label, texte)
 Les deux derniers ciblent par texte/label visible — pas de sélecteur CSS requis.
+Toutes les actions passent par UN fil dédié (`_on_browser_thread`) : Playwright
+synchrone refuse qu'un autre fil utilise sa page, et gui.py traite chaque message
+dans un nouveau fil — "ouvre X" marchait puis "lis la page" échouait ("cannot
+switch to a different thread"). get_page_text renvoie le contenu principal.
 
 ### Voix — tools/voice.py (1)
 speak(text, speed) — edge-tts (voix Henri, fr-FR), repli Windows TTS hors ligne si echec
+
+### Lecture à voix haute — tools/reader.py (1)
+read_aloud(url, stop) — lit TOUT le contenu principal d'une page en arrière-plan,
+par morceaux de 600 caractères (speak), sans appel IA ni troncature.
+- url vide = page ouverte dans le navigateur ; site qui refuse (403) ou page
+  JavaScript → repli sur le navigateur (open_and_read)
+- Lancement sans appel IA (tools/instant.py, read_aloud_reply) quand la
+  demande dit "à voix haute" + un lien, ou désigne la page ouverte ("cette
+  page") ; sinon le modèle choisit read_aloud (règle du prompt système)
+- "arrête la lecture", "stop", "tais-toi"… coupent la lecture sans appel IA
+  (stop_reading_reply) ; Échap aussi dans l'interface vocale
+- Pendant la lecture : voice_fullscreen.py n'écoute plus (le micro entendrait
+  Amah) et aucune autre réponse n'est prononcée (pas deux voix à la fois)
+- NE PAS imposer read_aloud par tool_choice : gpt-oss l'ignore, réessaie
+  open_browser et Groq rejette en 400
+
+### Contenu principal des pages — tools/page_text.py
+extract_main_text(html) : article sans menus, en-têtes, pieds de page,
+bandeaux cookies, articles liés ni encadrés Wikipédia (html.parser, aucune
+dépendance). Utilisé par read_webpage, get_page_text et read_aloud. Avant :
+les 2 000 caractères vus par le modèle étaient souvent le menu du site.
+gui.py transmet 4 000 caractères au modèle pour get_page_text/read_webpage
+(`_clip_result`), 2 000 pour les autres outils.
 
 ### Notifications — tools/notifications.py (2)
 send_notification(title, message, duration), set_reminder(message, minutes)
@@ -645,8 +674,9 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
 - [x] Conservation de l'historique réglable par client (AMAH_HISTORY_DAYS)
 - [x] Journal d'erreurs amah_errors.log (gui.py)
 - [x] Écran de configuration utilisable sur petit écran (bouton visible)
-- [ ] get_page_text renvoie surtout le menu des pages (inner_text du body) :
-  extraire main/article, et lire la page entière à voix haute sans troncature
+- [x] Contenu principal des pages (tools/page_text.py) + lecture complète à
+  voix haute (read_aloud, 100e outil) ; navigateur sur un fil unique (les
+  outils navigateur échouaient dès le 2e message dans gui.py)
 - [x] .exe recompilé avec ces corrections (zip 185 Mo) : testé depuis le zip
   décompressé dans un dossier vierge — écran de configuration en ~10 s,
   entièrement visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
