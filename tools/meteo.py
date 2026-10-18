@@ -2,6 +2,11 @@ import urllib.request
 import json
 
 
+def _desc(entry: dict) -> str:
+    """Description en français (lang_fr) ; weatherDesc est toujours en anglais."""
+    return (entry.get("lang_fr") or entry.get("weatherDesc") or [{"value": ""}])[0]["value"].strip()
+
+
 def get_weather(location: str = "auto") -> dict:
     """
     Météo via wttr.in — gratuit, sans clé API.
@@ -25,7 +30,7 @@ def get_weather(location: str = "auto") -> dict:
                 "date":      day["date"],
                 "max":       day["maxtempC"] + "°C",
                 "min":       day["mintempC"] + "°C",
-                "condition": day["hourly"][4]["weatherDesc"][0]["value"],
+                "condition": _desc(day["hourly"][4]),
             })
 
         return {
@@ -35,7 +40,7 @@ def get_weather(location: str = "auto") -> dict:
             "ressenti":     cur["FeelsLikeC"] + "°C",
             "humidite":     cur["humidity"] + "%",
             "vent":         cur["windspeedKmph"] + " km/h",
-            "condition":    cur["weatherDesc"][0]["value"],
+            "condition":    _desc(cur),
             "previsions":   forecasts,
         }
     except Exception as e:

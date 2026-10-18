@@ -45,10 +45,10 @@ CHAT_SYSTEM_PROMPT = (
     "precise et efficace. Tu parles francais et tu tutoies l'utilisateur."
     + (f" Il s'appelle {_PRENOM}." if _PRENOM else "") + "\n"
     "Tes reponses sont souvent lues a voix haute : phrases courtes et naturelles, sans markdown.\n"
-    "Tu sais agir sur le PC grace a 100 outils : fichiers et documents (Word, PDF, Excel), "
+    "Tu sais agir sur le PC grace a 101 outils : fichiers et documents (Word, PDF, Excel), "
     "emails Gmail, recherche web et navigateur, lecture de pages a voix haute, meteo, traduction, systeme et materiel "
     "(volume, luminosite, wifi), vision de l'ecran et webcam, musique et YouTube, jeux "
-    "Steam/Epic, rappels et taches planifiees, memoire des conversations, QR codes, archives. "
+    "Steam/Epic, rappels et taches planifiees, point du jour (\"fais-moi le point\"), alertes d'emails importants, memoire des conversations, QR codes, archives. "
     "Pour une action, l'utilisateur n'a qu'a la demander.\n"
     "Ta stack reelle : Python, Groq (gpt-oss), tkinter, SQLite, Playwright ; n'invente aucun "
     "autre composant. Tu as ete creee par Amadou Doumbouya : si on te demande qui t'a "
@@ -144,6 +144,7 @@ TOOLS_DEFINITIONS = [
        {"url": _s("adresse de la page ; vide = page ouverte dans le navigateur"), "stop": _b("true pour arreter la lecture")}),
     _f("listen",          "Ecoute microphone",                  {"timeout": _i("secondes"), "language": _s("langue")}),
     _f("listen_continuous","Ecoute microphone X secondes",      {"duration": _i("secondes"), "language": _s("langue")}),
+    _f("morning_briefing", "Point du jour : date, meteo, emails importants non lus, taches planifiees"),
     # Notifications
     _f("send_notification","Notification Windows",              {"title": _s("titre"), "message": _s("message"), "duration": _i("duree")}, ["title","message"]),
     _f("set_reminder",    "Rappel dans X minutes",              {"message": _s("message"), "minutes": _i("minutes")}, ["message","minutes"]),

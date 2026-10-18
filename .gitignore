@@ -6,8 +6,9 @@ git/
 *.txt.token
 ghp_*
 
-# Base de données locale
+# Base de données locale + état (date du dernier briefing du jour)
 amah_memory.db
+amah_state.json
 
 # Profil personnel (nom, emails, projets privés) : chaque utilisateur a le
 # sien, jamais publié. Modèle à copier : user_profile.example.txt

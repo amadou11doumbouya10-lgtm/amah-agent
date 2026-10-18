@@ -1,13 +1,13 @@
 # Amah Agent — Toutes les capacités (v1.5.0)
 
-> **100 outils réels** • Fonctionne hors ligne (sauf IA/web/email) • Windows 11 • Mis à jour le 11/06/2026
+> **101 outils réels** • Fonctionne hors ligne (sauf IA/web/email) • Windows 11 • Mis à jour le 11/06/2026
 
 ---
 
 ## Vue d'ensemble
 
 Amah Agent est une assistante IA locale qui s'exécute directement sur ton PC Windows.
-Elle comprend le français naturel et peut agir sur ton ordinateur via 100 outils réels,
+Elle comprend le français naturel et peut agir sur ton ordinateur via 101 outils réels,
 regroupés en 24 catégories. Depuis la v1.5, elle dispose aussi d'un **mode Live**
 (Gemini) pour une conversation vocale en temps réel, comme un appel téléphonique.
 
@@ -196,12 +196,19 @@ Amah se souvient d'informations entre les sessions.
 
 ---
 
-## 12. Notifications et Rappels — 2 outils
+## 12. Notifications, Rappels et Briefing — 3 outils
 
 | Outil | Ce qu'il fait | Exemple |
 |---|---|---|
 | `send_notification` | Affiche une notification Windows | *"Notifie-moi : réunion dans 5 minutes"* |
 | `set_reminder` | Programme un rappel dans X minutes | *"Rappelle-moi d'appeler Jean dans 20 minutes"* |
+| `morning_briefing` | Le point du jour : date, météo, emails importants non lus, tâches planifiées (sans IA) | *"Fais-moi le point"* |
+
+**Initiatives d'Amah** (sans appel IA, désactivables à l'installation) :
+- au premier lancement de la journée, Amah affiche d'elle-même le point du jour ;
+- quand un email important arrive (marqué Important par Gmail, ou expéditeur
+  prioritaire), notification Windows + message dans la conversation. Les
+  newsletters et notifications automatiques sont ignorées, rien n'est marqué comme lu.
 
 ---
 
@@ -371,7 +378,7 @@ Amah peut voir via la webcam — désactivé par défaut pour la vie privée.
 | Vols et voyages | 1 |
 | Mémoire persistante | 3 |
 | Voix | 4 |
-| Notifications et rappels | 2 |
+| Notifications, rappels et briefing | 3 |
 | Excel | 3 |
 | Utilitaires (calcul, zip, presse-papiers…) | 10 |
 | Images | 4 |

@@ -102,6 +102,11 @@ CATEGORIES = {
         "voix ecoute micro microphone notification notifie alerte rappel rappelle "
         "previens prevenir minutes reveille|a voix haute|ecoute moi",
     ),
+    "briefing": (
+        ("morning_briefing", "read_emails", "get_weather_simple", "list_tasks"),
+        "briefing|point du jour|fais moi le point|fait moi le point|le point de la journee|"
+        "programme du jour|resume du matin|resume de la journee|prevu aujourd hui",
+    ),
     "lecture": (
         ("read_aloud", "get_page_text", "read_webpage", "open_browser"),
         # Des phrases seulement : "lis" seul viserait aussi "lis mes emails"

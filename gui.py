@@ -207,6 +207,8 @@ class AmahGUI:
         self._bind_shortcuts()
         self._welcome()
         self._start_metrics()
+        self._email_watcher = None
+        self.root.after(1500, self._start_initiatives)
 
         # Auto-mute webcam (v1.5) : feedback visuel quand le son est coupe/retabli
         # automatiquement (callbacks declenches depuis le thread de surveillance)
@@ -610,6 +612,44 @@ class AmahGUI:
         self._write(("  Shift+Entrée = retour ligne  ·  ⚙ = liste outils  ·  [+] = fichier\n\n", "dim"))
         self._set_status("[OK] Pret")
         self._pulse_dot()
+
+    # ── Initiatives (sans appel IA, aucun quota Groq consommé) ────────────────
+
+    def _start_initiatives(self):
+        """Briefing au premier lancement du jour (AMAH_BRIEFING=0 : désactivé) et
+        surveillance des emails importants (AMAH_EMAIL_ALERTS=0 : désactivée)."""
+        from tools import briefing, email_watch
+
+        if briefing.briefing_due():
+            def _run():
+                try:
+                    texte = briefing.morning_briefing()["texte"]
+                except Exception as e:
+                    _log_error("briefing du jour", e)
+                    return
+                briefing.mark_briefing_done()
+                self.root.after(0, self._post_initiative, texte)
+            threading.Thread(target=_run, daemon=True).start()
+
+        if os.getenv("AMAH_EMAIL_ALERTS", "1").strip() != "0" and email_watch.gmail_configured():
+            self._email_watcher = email_watch.EmailWatcher(on_new=self._on_important_email).start()
+
+    def _on_important_email(self, mail: dict):
+        """Appelé par le fil de surveillance pour chaque nouvel email important."""
+        from tools.notifications import send_notification
+        send_notification("Email important", f"{mail['de']} : {mail['sujet']}", duration=8)
+        self.root.after(0, self._post_initiative,
+                        f"📩 Nouvel email important de {mail['de']} : « {mail['sujet']} ».")
+
+    def _post_initiative(self, text: str):
+        """Message d'Amah sans demande de l'utilisateur ; attend la fin d'une
+        réponse en cours pour ne pas s'insérer au milieu."""
+        if getattr(self, "busy", False):
+            self.root.after(1500, self._post_initiative, text)
+            return
+        # Dans le contexte : "lis-le", "réponds-lui" s'y rapportent ensuite
+        self.messages.append({"role": "assistant", "content": text})
+        self._write_msg("Amah >", text, "amah_lbl", "amah_txt")
 
     def _set_status(self, text: str, color: str = None):
         clean   = text.replace("[OK] ", "").replace("[!] ", "⚠ ")
@@ -1298,7 +1338,7 @@ class AmahGUI:
 
             self._trim_messages()
             # Reutilise la sous-liste d'outils ciblee (et non TOOLS_DEFINITIONS,
-            # ~4200 tokens pour les 100 outils) pour eviter de depasser le TPM
+            # ~4200 tokens pour les 101 outils) pour eviter de depasser le TPM
             # Groq (12000) sur les enchainements multi-outils -- avec repli sur
             # la liste complete si le modele reclame un outil hors de cette sous-liste.
             try:
@@ -1488,6 +1528,17 @@ class SetupWindow:
         self.v_pwd = tk.StringVar()
         tk.Entry(body, textvariable=self.v_pwd, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
 
+        # ── Initiatives (sans appel IA) ───────────────────────────────────────
+        self._lbl(body, "Ville", "optionnel · météo du briefing du jour (sinon devinée)")
+        self.v_city = tk.StringVar(value="")
+        tk.Entry(body, textvariable=self.v_city, **self._es()).pack(fill=tk.X, pady=(0, 8))
+
+        self.v_initiatives = tk.BooleanVar(value=True)
+        tk.Checkbutton(body, text=" Briefing du jour + alerte quand un email important arrive",
+                       variable=self.v_initiatives, bg=BG_DARK, fg=GOLD, selectcolor="#2a2a27",
+                       activebackground=BG_DARK, activeforeground=GOLD, font=("Consolas", 10),
+                       anchor="w", cursor="hand2").pack(fill=tk.X, pady=(0, 12))
+
         # Durée de conservation des conversations, choisie par chaque client
         self._lbl(body, "Conserver les conversations",
                   "Amah s'en sert pour se souvenir de vos échanges · modifiable ensuite dans .env")
@@ -1546,6 +1597,11 @@ class SetupWindow:
         if gmail:   lines.append(f"GMAIL_ADDRESS={gmail}\n")
         if pwd:     lines.append(f"GMAIL_APP_PASSWORD={pwd}\n")
         lines.append(f"AMAH_HISTORY_DAYS={HISTORY_CHOICES[self.v_history.get()]}\n")
+        city = self.v_city.get().strip().replace("\n", " ")
+        if city:
+            lines.append(f"AMAH_CITY={city}\n")
+        initiatives = "1" if self.v_initiatives.get() else "0"
+        lines.append(f"AMAH_BRIEFING={initiatives}\nAMAH_EMAIL_ALERTS={initiatives}\n")
 
         self.env_path.write_text(''.join(lines), encoding='utf-8')
         load_dotenv(self.env_path, override=True)

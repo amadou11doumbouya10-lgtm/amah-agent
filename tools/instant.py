@@ -123,12 +123,30 @@ def read_aloud_reply(user_text: str) -> Optional[str]:
             "Dis « arrête la lecture » pour m'arrêter.")
 
 
+# "Fais-moi le point" : briefing du jour composé sans appel IA (tools/briefing.py)
+_BRIEFING = re.compile(
+    r"^(?:(?:amah|salut|bonjour|hey) )*(?:(?:tu peux |peux tu )?fai[st] moi (?:le|un) point"
+    r"|(?:le |mon |un )?briefing(?: du (?:jour|matin))?|(?:le )?point du (?:jour|matin)"
+    r"|(?:qu est ce qui est |quoi de |qu est ce qu il y a de )?prevu aujourd hui"
+    r"|programme du jour|resume du matin)(?: (?:stp|s il te plait|amah))?$"
+)
+
+
+def briefing_reply(user_text: str) -> Optional[str]:
+    from tools.tool_router import normalize
+    if not _BRIEFING.match(normalize(user_text)):
+        return None
+    from tools import TOOL_FUNCTIONS
+    res = TOOL_FUNCTIONS["morning_briefing"]()
+    return res.get("texte") if isinstance(res, dict) and res.get("success") else None
+
+
 def instant_reply(user_text: str) -> Optional[str]:
     """Réponse locale pour l'heure, la date, un calcul simple, la lecture
-    d'une page à voix haute (lancement, arrêt), sinon None."""
+    d'une page à voix haute (lancement, arrêt), le point du jour, sinon None."""
     from tools import TOOL_FUNCTIONS
 
-    for local in (stop_reading_reply, read_aloud_reply):
+    for local in (stop_reading_reply, read_aloud_reply, briefing_reply):
         reply = local(user_text)
         if reply:
             return reply

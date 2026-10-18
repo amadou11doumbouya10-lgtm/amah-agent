@@ -2,7 +2,7 @@
 
 ## Présentation
 Agent IA local sur PC Windows. Cerveau : Groq (gpt-oss-120b / gpt-oss-20b,
-gratuit) + mode vocal temps réel Gemini Live. 100 outils réels.
+gratuit) + mode vocal temps réel Gemini Live. 101 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
 Version actuelle : **v1.5.2** (source unique : `CURRENT_VERSION` dans tools/updater.py)
@@ -39,7 +39,7 @@ amah-agent/
 ├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
 ├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
-│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (100 outils) : registre qui
+│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (101 outils) : registre qui
 │   │                            corrige les noms gpt-oss, garde-fou + statistiques
 │   │   ── Pipeline partagé (gui.py, voice_fullscreen.py, agent.py) ──
 │   ├── tool_router.py        ← Routeur d'outils unique (4 niveaux, 0 à 12 outils)
@@ -125,6 +125,8 @@ py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
 py -3.13 -m benchmarks.benchmark_license       # licences : 11/11 attendu
 py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique : 11/11
 py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
+py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code PowerShell : 13/13
+py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
 ```
 
 ## Installation et lancement
@@ -206,7 +208,7 @@ Llama 3.3 70B, Llama 3.1 8B et llama-4-scout ont été retirés par Groq (404).
    - Tester sur des phrases DIFFÉRENTES des mots-clés : les anciens benchmarks
      reprenaient les phrases des motifs et mesuraient la mémorisation
 
-## Les 100 outils
+## Les 101 outils
 ### Fichiers — tools/files.py (12)
 list_files, organize_folder, find_files, move_file, create_folder, read_file,
 write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
@@ -269,6 +271,25 @@ gui.py transmet 4 000 caractères au modèle pour get_page_text/read_webpage
 
 ### Notifications — tools/notifications.py (2)
 send_notification(title, message, duration), set_reminder(message, minutes)
+Titre et texte passés à PowerShell par variables d'environnement (voir Sécurité).
+
+### Briefing et initiatives — tools/briefing.py (1), tools/email_watch.py
+morning_briefing() — date, météo (AMAH_CITY, sinon devinée par l'IP), emails
+importants non lus, tâches planifiées ; composé SANS appel IA, sources
+interrogées en parallèle (~3-5 s). "fais-moi le point", "briefing", "le point
+du jour"… : réponse instantanée (instant.py, briefing_reply).
+- gui.py l'affiche de lui-même au premier lancement de la journée après 5 h
+  (`_start_initiatives`, date dans amah_state.json, gitignoré) ; AMAH_BRIEFING=0
+  le désactive
+- Alertes : EmailWatcher vérifie la boîte toutes les AMAH_EMAIL_CHECK_MINUTES
+  (10) ; chaque NOUVEL email important → notification Windows + message
+  d'Amah dans le chat (ajouté au contexte : "lis-le" marche ensuite). Les
+  emails déjà là au démarrage ne déclenchent rien (le briefing les annonce).
+  AMAH_EMAIL_ALERTS=0 désactive ; écran de configuration : une case pour les deux
+- Important = pas un envoi de masse (List-Unsubscribe, Precedence bulk,
+  Auto-Submitted, noreply…) ET libellé Gmail \Important ; ou expéditeur
+  prioritaire (AMAH_VIP_EMAILS, adresses ou domaines), toujours important
+- Boîte ouverte en lecture seule + BODY.PEEK : rien n'est marqué comme lu
 
 ### Excel — tools/excel.py (3)
 read_excel(path), create_excel(filename, headers, rows), append_to_excel(path, rows)
@@ -492,6 +513,13 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Clé de licence liée au hardware (non transférable), signée Ed25519 : seule
   la clé privée de l'éditeur peut en créer
 - Tool results tronqués à 2000 chars (protection injection/fuites)
+- **Jamais de texte externe dans le code d'un script PowerShell** (sujet
+  d'email, page lue, texte copié, texte prononcé) : le passer par une
+  variable d'environnement ($env:…). PowerShell traite aussi ’ ‘ comme des
+  apostrophes et “ ” „ comme des guillemets, "\"" n'y échappe rien et
+  "$(…)" s'exécute entre guillemets. Injection prouvée le 18/10/2026 sur
+  send_notification, le repli vocal de speak et write_clipboard (corrigés,
+  benchmark_injection)
 
 ## GitHub
 - Repo : github.com/amadou11doumbouya10-lgtm/amah-agent
@@ -677,6 +705,9 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
 - [x] Contenu principal des pages (tools/page_text.py) + lecture complète à
   voix haute (read_aloud, 100e outil) ; navigateur sur un fil unique (les
   outils navigateur échouaient dès le 2e message dans gui.py)
+- [x] Sécurité : injection PowerShell corrigée (notification, voix, presse-papiers)
+- [x] Initiatives : briefing du jour au premier lancement + alertes d'emails
+  importants (morning_briefing, 101e outil ; sans appel IA) ; météo en français
 - [x] .exe recompilé avec ces corrections (zip 185 Mo) : testé depuis le zip
   décompressé dans un dossier vierge — écran de configuration en ~10 s,
   entièrement visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip

@@ -19,6 +19,7 @@ _TOOL_MODULES = [
     ("tools.browser", ["open_browser", "click_element", "fill_form", "take_screenshot", "get_page_text", "click_text", "type_in_field"]),
     ("tools.voice", ["speak"]),
     ("tools.reader", ["read_aloud"]),
+    ("tools.briefing", ["morning_briefing"]),
     ("tools.notifications", ["send_notification", "set_reminder"]),
     ("tools.excel", ["read_excel", "create_excel", "append_to_excel"]),
     ("tools.clipboard", ["read_clipboard", "write_clipboard"]),

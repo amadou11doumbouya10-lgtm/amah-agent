@@ -69,7 +69,7 @@ Contrairement aux assistants en ligne, **Amah fonctionne localement**, les donn�
 | 🎮 **Jeux** | Lancer/installer/chercher des jeux Steam, ouvrir Epic Games |
 | 📷 **Vision webcam** | Analyser l'image webcam par IA + auto-mute confidentialité (coupe le son si plusieurs personnes détectées) |
 
-**Total : 100 outils opérationnels.**
+**Total : 101 outils opérationnels.**
 
 ---
 
@@ -152,7 +152,7 @@ amah-agent/
 ├── system_prompt.txt         ← Texte du prompt système (éditable sans toucher au code)
 ├── docs/AMAH_SELF.md          ← Fiche condensée d'auto-connaissance (architecture, outils, roadmap)
 ├── tools/
-│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (100 outils, génération dynamique)
+│   ├── __init__.py           ← Source unique de TOOL_FUNCTIONS (101 outils, génération dynamique)
 │   ├── files.py              ← Fichiers/dossiers (12 outils)
 │   ├── documents.py          ← Word, PDF, TXT (4 outils)
 │   ├── search.py             ← DuckDuckGo + lecture web (2 outils)
