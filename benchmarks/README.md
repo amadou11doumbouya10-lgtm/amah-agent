@@ -8,13 +8,14 @@ py -3.13 -m benchmarks.benchmark_tool_router
 
 ## À lancer après chaque modification
 
-Ces deux vérifications n'appellent pas l'IA et renvoient un code de sortie 1 en
+Ces vérifications n'appellent pas l'IA et renvoient un code de sortie 1 en
 cas d'échec :
 
 | Script | Vérifie |
 |---|---|
 | `benchmark_tool_router.py` | Le routeur partagé sur 95 phrases (40 de l'audit, 55 formulées autrement que ses mots-clés). Attendu : 100 %. |
 | `benchmark_guard.py` | Le garde-fou des actions sensibles : refus par défaut, Oui/Non, filtre de commandes, terminal. Attendu : 15/15. |
+| `benchmark_license.py` | Les licences signées : clé valide acceptée, autre machine / clé modifiée / ancien format refusés, clé privée du .env = clé publique du code. Attendu : 11/11. |
 
 Pour le routeur, n'ajoute pas un mot-clé juste pour faire passer une phrase du
 jeu « nouvelles phrases » : ce jeu mesure la compréhension de formulations

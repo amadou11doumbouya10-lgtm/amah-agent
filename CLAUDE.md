@@ -122,6 +122,7 @@ amah-agent/
 ```bash
 py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 95/95 attendu
 py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
+py -3.13 -m benchmarks.benchmark_license       # licences : 11/11 attendu
 ```
 
 ## Installation et lancement
@@ -154,10 +155,11 @@ build.bat                                 # compiler le .exe pour distribution
 - IMAP activé dans les paramètres Gmail
 
 ### Licence (obligatoire pour clients)
-- AMAH_LICENSE_KEY dans .env
+- AMAH_LICENSE_KEY dans .env du client (clé de ~115 caractères, groupes de 8)
 - Générée avec : py -3.13 tools/license.py <machine_uuid>
 - Ou double-clic sur developpeur/generate_license.bat
-- Clé secrète dans .env (AMAH_LICENSE_SECRET)
+- Clé PRIVÉE de signature dans le .env développeur uniquement
+  (AMAH_LICENSE_PRIVATE_KEY) — jamais chez un client, jamais publiée
 
 ### LiteLLM (optionnel, usage développeur uniquement)
 - LITELLM_URL dans .env (ex: http://localhost:4000) active un proxy LiteLLM
@@ -368,10 +370,20 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Interruption naturelle (l'utilisateur peut couper la parole d'Amah)
 - Nécessite GEMINI_API_KEY dans .env (gratuite sur Google AI Studio)
 
-## Système de licence
-- Offline HMAC-SHA256 lié au Machine UUID Windows
-- Clé secrète dans .env (AMAH_LICENSE_SECRET)
-- Génération : py -3.13 tools/license.py <machine_uuid>
+## Système de licence (signatures Ed25519, depuis le 18/10/2026)
+- Offline, lié au Machine UUID Windows : la licence est la signature de l'UUID
+  par la clé PRIVÉE de l'éditeur (AMAH_LICENSE_PRIVATE_KEY, .env développeur)
+- Amah ne contient que la clé PUBLIQUE (PUBLIC_KEY_B64 dans tools/license.py) :
+  elle vérifie une licence mais ne permet pas d'en fabriquer → le dépôt peut
+  rester public. Aucun secret dans le .env des clients.
+- Génération : py -3.13 tools/license.py <machine_uuid> ;
+  nouvelle paire : py -3.13 tools/license.py --nouvelle-paire (invalide toutes
+  les licences émises : changer PUBLIC_KEY_B64 et recompiler)
+- Pourquoi : l'ancien HMAC exigeait le secret chez chaque client pour vérifier
+  (donc chacun pouvait générer des licences), et ce secret était écrit en dur
+  dans les commits fa07de2 / 85d1717, publics sur GitHub. Les clés
+  XXXXX-XXXXX-XXXXX-XXXXX émises avant sont refusées : à régénérer.
+- Vérification : py -3.13 -m benchmarks.benchmark_license (11/11)
 - LicenseWindow intégrée dans SetupWindow (premier lancement)
 - UUID affiché + bouton Copier dans l'écran de config
 
@@ -415,7 +427,8 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Clé API dans .env (jamais dans le code ni dans le .exe)
 - Mot de passe Gmail dans .env
 - .env.example sans vraies credentials
-- Clé de licence liée au hardware (non transférable)
+- Clé de licence liée au hardware (non transférable), signée Ed25519 : seule
+  la clé privée de l'éditeur peut en créer
 - Tool results tronqués à 2000 chars (protection injection/fuites)
 
 ## GitHub

@@ -1,28 +1,28 @@
 """
-Système de licence offline pour Amah Agent.
-La clé est liée à l'identifiant unique de la machine Windows.
+Système de licence offline pour Amah Agent — licences signées (Ed25519).
 
-Pour générer une clé client : py -3.13 tools/license.py <machine_id>
+Une licence est la signature de l'identifiant de la machine Windows (UUID) par
+la clé PRIVÉE de l'éditeur, qui ne quitte jamais le .env du développeur
+(AMAH_LICENSE_PRIVATE_KEY). Amah ne contient que la clé PUBLIQUE : elle permet
+de vérifier une licence, pas d'en fabriquer. Le code peut donc être public.
+
+Avant le 18/10/2026, les licences étaient un HMAC avec un secret partagé : pour
+vérifier, chaque client aurait dû avoir ce secret (et donc pouvoir générer des
+licences), et il figurait en clair dans l'historique public du dépôt. Les
+anciennes clés XXXXX-XXXXX-XXXXX-XXXXX ne sont plus acceptées.
+
+Générer une clé client  : py -3.13 tools/license.py <machine_id>
+Clé pour ce PC          : py -3.13 tools/license.py
+Nouvelle paire de clés  : py -3.13 tools/license.py --nouvelle-paire
 """
-import hashlib
-import hmac
+import base64
+import os
 import subprocess
 import sys
-import os
 
-def _get_secret() -> bytes:
-    """Lit le secret de licence depuis .env -- AUCUNE valeur par défaut :
-    un secret codé en dur dans les sources annulerait la protection HMAC
-    pour tous les clients si .env est absent ou mal chargé (fail-closed).
-    Lu à l'appel (pas au chargement du module) car load_dotenv() s'exécute
-    après l'import de ce module dans gui.py."""
-    secret = os.getenv("AMAH_LICENSE_SECRET", "").strip()
-    if not secret:
-        raise RuntimeError(
-            "AMAH_LICENSE_SECRET manquant dans .env -- impossible de generer "
-            "ou de valider une licence sans ce secret."
-        )
-    return secret.encode()
+# Clé publique de l'éditeur (Ed25519, 32 octets en base64) — publique par nature.
+# Elle correspond à AMAH_LICENSE_PRIVATE_KEY du .env développeur.
+PUBLIC_KEY_B64 = "HkS74mc4+32amhzjMF+bXc0zMZwpbrTmmJ8waw9yzpM="
 
 
 def _run_ps(cmd: str, timeout: int = 10) -> str:
@@ -55,12 +55,55 @@ def get_machine_id() -> str:
         return "UNKNOWN"
 
 
+def _message(machine_id: str) -> bytes:
+    """Ce qui est signé : l'identifiant machine normalisé."""
+    return str(machine_id or "").strip().upper().encode()
+
+
+def _encode_key(signature: bytes) -> str:
+    """Signature (64 octets) -> clé lisible en base32, par groupes de 8."""
+    raw = base64.b32encode(signature).decode().rstrip("=")
+    return "-".join(raw[i:i + 8] for i in range(0, len(raw), 8))
+
+
+def _decode_key(key: str) -> bytes:
+    clean = "".join(ch for ch in str(key or "").upper() if ch.isalnum())
+    clean += "=" * (-len(clean) % 8)
+    return base64.b32decode(clean)
+
+
+def sign_machine_id(machine_id: str, private_key_b64: str) -> str:
+    """Clé de licence pour machine_id, signée avec la clé privée donnée."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    private_key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_key_b64))
+    return _encode_key(private_key.sign(_message(machine_id)))
+
+
+def verify_license(machine_id: str, key: str, public_key_b64: str = PUBLIC_KEY_B64) -> bool:
+    """Vrai si key est une signature valide de machine_id. N'utilise que la clé publique."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        signature = _decode_key(key)
+        if len(signature) != 64:
+            return False
+        public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
+        public_key.verify(signature, _message(machine_id))
+        return True
+    except (InvalidSignature, ValueError, TypeError):
+        return False
+
+
 def generate_license_key(machine_id: str) -> str:
-    """Génère une clé de licence pour un machine_id donné."""
-    raw = hmac.new(_get_secret(), machine_id.encode(), hashlib.sha256).hexdigest()
-    # Format : XXXXX-XXXXX-XXXXX-XXXXX (20 caractères hex)
-    key = raw[:20].upper()
-    return f"{key[:5]}-{key[5:10]}-{key[10:15]}-{key[15:20]}"
+    """Génère une clé de licence (nécessite la clé privée du .env développeur).
+    Lue à l'appel car load_dotenv() s'exécute après l'import de ce module."""
+    private_key_b64 = os.getenv("AMAH_LICENSE_PRIVATE_KEY", "").strip()
+    if not private_key_b64:
+        raise RuntimeError(
+            "AMAH_LICENSE_PRIVATE_KEY manquant dans .env -- seul l'éditeur peut "
+            "générer des licences."
+        )
+    return sign_machine_id(machine_id, private_key_b64)
 
 
 def validate_license(key: str) -> bool:
@@ -68,13 +111,7 @@ def validate_license(key: str) -> bool:
     machine_id = get_machine_id()
     if machine_id == "UNKNOWN":
         return False  # Fail closed : refuse si l'ID machine est illisible
-    try:
-        expected = generate_license_key(machine_id)
-    except RuntimeError:
-        return False  # Fail closed : pas de secret configure => aucune cle valide
-    clean_key = key.upper().replace("-", "").replace(" ", "")
-    clean_exp = expected.upper().replace("-", "")
-    return clean_key == clean_exp
+    return verify_license(machine_id, key)
 
 
 def is_licensed() -> bool:
@@ -98,22 +135,38 @@ def get_license_info() -> dict:
     }
 
 
-# ── Outil en ligne de commande pour générer une clé ─────────────────────────
+def generate_keypair():
+    """Nouvelle paire (clé privée, clé publique) en base64."""
+    from cryptography.hazmat.primitives import serialization as s
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    private_key = Ed25519PrivateKey.generate()
+    private_b64 = base64.b64encode(private_key.private_bytes(
+        s.Encoding.Raw, s.PrivateFormat.Raw, s.NoEncryption())).decode()
+    public_b64 = base64.b64encode(private_key.public_key().public_bytes(
+        s.Encoding.Raw, s.PublicFormat.Raw)).decode()
+    return private_b64, public_b64
+
+
+# ── Outil en ligne de commande ──────────────────────────────────────────────
 if __name__ == "__main__":
     from pathlib import Path
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-    if len(sys.argv) == 2:
+    if len(sys.argv) == 2 and sys.argv[1] == "--nouvelle-paire":
+        private_b64, public_b64 = generate_keypair()
+        print("Nouvelle paire de cles (les licences deja emises deviendront invalides) :")
+        print(f"  .env        : AMAH_LICENSE_PRIVATE_KEY={private_b64}")
+        print(f"  license.py  : PUBLIC_KEY_B64 = \"{public_b64}\"")
+        print("Ne publie JAMAIS la cle privee.")
+    elif len(sys.argv) == 2:
         mid = sys.argv[1]
-        key = generate_license_key(mid)
         print(f"Machine ID : {mid}")
-        print(f"Cle        : {key}")
+        print(f"Cle        : {generate_license_key(mid)}")
     else:
         mid = get_machine_id()
-        key = generate_license_key(mid)
         print(f"Machine ID de ce PC : {mid}")
-        print(f"Cle generee         : {key}")
+        print(f"Cle generee         : {generate_license_key(mid)}")
         print()
         print("Pour generer une cle pour un client :")
         print("  py -3.13 tools/license.py <machine_id_client>")
