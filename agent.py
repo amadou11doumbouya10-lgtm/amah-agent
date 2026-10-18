@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from config import (
     SYSTEM_PROMPT,
     RESPONSE_SYSTEM_PROMPT,
+    CHAT_SYSTEM_PROMPT,
     MODEL,
     FINAL_MODEL,
     TOOLS_DEFINITIONS,
@@ -25,7 +26,7 @@ from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.guard import set_confirm_handler
 from tools.router_v04 import normalize_for_router
 from tools.router_v03 import detect_intents
-from tools.tool_router import select_tools
+from tools.tool_router import select_tools, forced_tool
 from tools.fastpath_v01 import detect_fastpath
 from tools.context_v01 import ConversationContext
 from tools.planner_v04 import PlannerPlan, PlannerStep, build_plan
@@ -40,7 +41,7 @@ from tools.voice_pipeline_v01 import (
     normalize_spoken_command,
     voice_local_clarification,
 )
-from tools.memory import save_message, load_recent_messages
+from tools.memory import save_message, load_resume_messages
 from tools.memory_recall_v024 import format_recall
 from tools.memory_context import (
     memory_context,
@@ -1415,23 +1416,18 @@ def chat(
             return "Je n'ai pas reconnu cette commande vocale. Peux-tu la reformuler plus simplement ?"
 
         if not available_tools:
-            if context_hint:
-                messages[0]["content"] = (
-                    str(messages[0].get("content", "") or "")
-                    + "\n\n"
-                    + context_hint
-                ).strip()
-
+            # Conversation pure (le routeur ne renvoie 0 outil que dans ce cas) :
+            # prompt court au lieu de SYSTEM_PROMPT (~3 700 tokens de règles
+            # d'outils), sur le modèle léger comme gui.py. Le contexte n'est
+            # ajouté qu'une fois (il l'était deux fois auparavant).
             llm_messages = _compact_messages_for_llm(messages)
-            if context_hint:
-                llm_messages[0]["content"] = (
-                    str(llm_messages[0].get("content", "") or "")
-                    + "\n\n"
-                    + context_hint
-                ).strip()
+            llm_messages[0]["content"] = (
+                CHAT_SYSTEM_PROMPT
+                + ("\n\n" + context_hint if context_hint else "")
+            )
 
             request_kwargs = {
-                "model": MODEL,
+                "model": FINAL_MODEL,
                 "messages": llm_messages,
                 "max_tokens": 2048,
                 "temperature": 0.4,
@@ -1530,13 +1526,15 @@ def chat(
         }
 
         # Une seule fonction : on impose précisément cette fonction.
-        if len(available_tools) == 1 and tool_names:
+        # Question d'actualité sans outil précis : recherche web imposée.
+        forced = forced_tool(user_text, available_tools)
+        if forced or (len(available_tools) == 1 and tool_names):
             request_kwargs[
                 "tool_choice"
             ] = {
                 "type": "function",
                 "function": {
-                    "name": tool_names[0],
+                    "name": forced or tool_names[0],
                 },
             }
         else:
@@ -1704,7 +1702,9 @@ def main():
         else 40
     )
 
-    previous = load_recent_messages(
+    # Dernière session seulement, si elle date de moins de 12 h, sans question
+    # restée sans réponse (voir tools/memory.py, load_resume_messages).
+    previous = load_resume_messages(
         limit=history_limit
     )
 

@@ -94,6 +94,14 @@ HELDOUT = {
  "est-ce que ça va pleuvoir à Conakry ?": "get_weather|get_weather_simple",
 }
 
+# Phrases ratées lors de vrais essais : les mots "version" et "prix" envoyaient
+# la question vers code/amah ou utils, sans web_search (test du 18/10/2026).
+REGRESSIONS = {
+ "quelle est la dernière version de Python sortie ?": "web_search",
+ "quel est le prix du bitcoin aujourd'hui": "web_search",
+ "les nouveautés de Windows 11": "web_search",
+}
+
 
 def score(cases):
     ok, misses, sizes = 0, [], []
@@ -113,7 +121,8 @@ def score(cases):
 
 if __name__ == "__main__":
     failed = False
-    for label, cases in (("audit", AUDIT40), ("nouvelles phrases", HELDOUT)):
+    for label, cases in (("audit", AUDIT40), ("nouvelles phrases", HELDOUT),
+                         ("régressions", REGRESSIONS)):
         ok, misses, avg = score(cases)
         print(f"{label:18} {ok}/{len(cases)} ({100 * ok / len(cases):.0f} %)  "
               f"outils proposés en moyenne : {avg:.1f}")

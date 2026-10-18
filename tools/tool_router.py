@@ -98,7 +98,8 @@ CATEGORIES = {
     ),
     "voix_rappels": (
         ("set_reminder", "send_notification", "speak", "listen", "listen_continuous"),
-        "parle parler voix ecoute micro microphone notification notifie alerte rappel rappelle "
+        # Pas "parle" : "parle-moi de la Guinée" proposait les outils de voix
+        "voix ecoute micro microphone notification notifie alerte rappel rappelle "
         "previens prevenir minutes reveille|a voix haute|ecoute moi",
     ),
     "images": (
@@ -185,6 +186,35 @@ CHAT_SENTENCES = (
     r"qui es tu", r"tu es qui", r"comment tu t appelles", r"c est quoi ton nom",
     r"presente toi", r"parle moi de toi", r"qui t a (cree|creee|fait)",
 )
+
+
+# Indices d'une information qui change souvent : sans recherche web, gpt-oss
+# répond de mémoire avec des faits périmés (test du 18/10 : modèles Groq
+# retirés présentés comme disponibles, "Llama 3.3 70B (gpt-oss-120b)").
+_FRESH_FACTS = re.compile(
+    r"\b(?:nouveaute|nouveautes|nouveau|nouveaux|nouvelle|nouvelles|recent|recente|recents|"
+    r"recentes|recemment|dernier|derniere|derniers|dernieres|actualite|actualites|actu|news|"
+    r"annonce|annonces|sorti|sortie|sortis|publie|publiee|publies|version|versions|modele|"
+    r"modeles|prix|tarif|tarifs|20[0-9]{2})\b"
+)
+# Catégories qui portent sur les données de l'utilisateur, pas sur le monde
+_LOCAL_DATA = {"fichiers", "documents", "email", "memoire", "archives", "excel",
+               "presse_papiers", "images", "planif", "voix_rappels"}
+
+
+def forced_tool(text: str, tools: list, info: dict = None):
+    """Outil à imposer au premier appel, ou None.
+
+    web_search est imposé quand la question porte sur une information qui
+    change (actualité, modèles, prix...) ET qu'aucun outil précis n'est visé :
+    "lis mes 3 derniers emails" reste sur read_emails.
+    """
+    if info is None:
+        _tools, info = select_tools(text, [t for t in tools])
+    if info.get("niveau") != "defaut" or not _FRESH_FACTS.search(normalize(text)):
+        return None
+    names = {t["function"]["name"] for t in tools}
+    return "web_search" if "web_search" in names else None
 
 
 def normalize(text: str) -> str:
@@ -287,6 +317,14 @@ def select_tools(text: str, tools_definitions: list, max_tools: int = MAX_TOOLS)
         return selected, {"niveau": "defaut", "intentions": [], "categories": []}
 
     ranked = sorted(scores, key=lambda n: (-scores[n], order[n]))[:max_tools]
+    # Information qui change reconnue seulement par mots-clés : "dernière version
+    # de Python" tombait sur code/amah, "prix du bitcoin" sur utils, sans
+    # web_search — gpt-oss l'appelait quand même et Groq rejetait (400).
+    # Pas pour les données locales ("lis mes 3 derniers emails", "nouveau dossier").
+    if (not intents and _FRESH_FACTS.search(norm) and "web_search" not in ranked
+            and not hits.keys() & _LOCAL_DATA):
+        extra = [n for n in ("web_search", "read_webpage") if n in by_name and n not in ranked]
+        ranked = ranked[:max_tools - len(extra)] + extra
     level = "intentions+mots" if intents and hits else ("intentions" if intents else "mots")
     return [by_name[n] for n in ranked], {
         "niveau": level, "intentions": intents, "categories": sorted(hits, key=lambda c: -hits[c]),

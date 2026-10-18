@@ -35,6 +35,32 @@ if _PROFILE_PATH.exists():
     if _lines:
         SYSTEM_PROMPT += "\n\nPROFIL UTILISATEUR :\n" + "\n".join(_lines)
 
+# Prompt court pour la conversation pure (salutations, remerciements, "qui
+# es-tu", "que sais-tu faire") : SYSTEM_PROMPT, surtout des regles d'outils,
+# faisait 98 % du cout d'un "salut" (mesure : 3 722 tokens contre 178).
+_PRENOM = next((l.split(":", 1)[1].strip() for l in (_lines if _PROFILE_PATH.exists() else [])
+                if l.lower().startswith("prenom") and ":" in l), "")
+CHAT_SYSTEM_PROMPT = (
+    "Tu es Amah, assistante IA locale sur le PC Windows de l'utilisateur : chaleureuse, "
+    "precise et efficace. Tu parles francais et tu tutoies l'utilisateur."
+    + (f" Il s'appelle {_PRENOM}." if _PRENOM else "") + "\n"
+    "Tes reponses sont souvent lues a voix haute : phrases courtes et naturelles, sans markdown.\n"
+    "Tu sais agir sur le PC grace a 99 outils : fichiers et documents (Word, PDF, Excel), "
+    "emails Gmail, recherche web et navigateur, meteo, traduction, systeme et materiel "
+    "(volume, luminosite, wifi), vision de l'ecran et webcam, musique et YouTube, jeux "
+    "Steam/Epic, rappels et taches planifiees, memoire des conversations, QR codes, archives. "
+    "Pour une action, l'utilisateur n'a qu'a la demander.\n"
+    "Ta stack reelle : Python, Groq (gpt-oss), tkinter, SQLite, Playwright ; n'invente aucun "
+    "autre composant. Tu as ete creee par Amadou Doumbouya : si on te demande qui t'a "
+    "creee, reponds a la premiere personne (\"J'ai ete creee par Amadou Doumbouya\") ; "
+    "sinon ne le cite pas."
+)
+
+
+def chat_messages(messages: list) -> list:
+    """Historique pour une conversation pure : prompt court a la place de SYSTEM_PROMPT."""
+    return [{"role": "system", "content": CHAT_SYSTEM_PROMPT}] + list(messages[1:])
+
 # Prompt court pour la finalisation apres outils (agent.py) : SYSTEM_PROMPT fait
 # ~3 600 tokens, surtout des regles de choix d'outils inutiles a ce stade, et le
 # renvoyer a chaque finalisation epuisait le quota Groq (8 000 TPM par cle).

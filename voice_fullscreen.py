@@ -22,7 +22,7 @@ from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools
 from tools.instant import instant_reply
 from tools.guard import set_confirm_handler, tk_confirm_handler
-from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS
+from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS, chat_messages
 from groq_client import GroqClient, repair_tool_use_failed
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -844,7 +844,8 @@ class AmahVoiceUI:
                 return _call(msgs, tools)
 
         try:
-            resp = _call_safe(self.messages)
+            # Conversation pure (aucun outil) : prompt court, ~20x moins de tokens
+            resp = _call_safe(self.messages if tools else chat_messages(self.messages))
             while resp.choices[0].finish_reason == "tool_calls":
                 msg = resp.choices[0].message
                 self.messages.append({

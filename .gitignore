@@ -53,6 +53,7 @@ browser_profile/
 live_debug.log
 *_debug.log
 voice_error.log
+amah_errors.log
 
 # LiteLLM dev proxy (usage personnel uniquement, jamais pour les clients)
 litellm_config.yaml

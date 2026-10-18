@@ -1,3 +1,4 @@
+import os
 import sys
 import sqlite3
 import logging
@@ -46,8 +47,29 @@ def save_message(session_id: str, role: str, content: str) -> None:
         log.warning("save_message failed: %s", e)
 
 
-def cleanup_old_messages(days: int = 90) -> None:
-    """Supprime les messages de conversation de plus de X jours."""
+DEFAULT_HISTORY_DAYS = 365
+
+
+def history_retention_days() -> int:
+    """Durée de conservation des conversations choisie par l'utilisateur.
+
+    AMAH_HISTORY_DAYS dans .env (écran de configuration) ; 0 = toujours garder.
+    Le rappel de mémoire (tools/memory_context.py) cherche dans cet historique :
+    une durée trop courte efface ce qu'Amah pourrait retrouver.
+    """
+    try:
+        days = int(os.getenv("AMAH_HISTORY_DAYS", "").strip() or DEFAULT_HISTORY_DAYS)
+    except ValueError:
+        days = DEFAULT_HISTORY_DAYS
+    return max(0, days)
+
+
+def cleanup_old_messages(days: int = None) -> None:
+    """Supprime les messages de conversation plus anciens que la durée choisie."""
+    if days is None:
+        days = history_retention_days()
+    if days <= 0:
+        return  # conservation illimitée
     try:
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         with sqlite3.connect(DB_PATH) as conn:
@@ -84,6 +106,47 @@ def load_recent_messages(limit: int = 20) -> list:
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
     except Exception as e:
         log.warning("load_recent_messages failed: %s", e)
+        return []
+
+
+def load_resume_messages(max_age_hours: float = 12, limit: int = 10) -> list:
+    """Messages à reprendre au démarrage : la dernière session seulement, si
+    elle est récente, sans question restée sans réponse à la fin.
+
+    load_recent_messages() rechargeait les 10 derniers messages quelle que soit
+    leur date : une question du 10 octobre restée sans réponse a été prise le
+    18 pour la demande en cours ("salut" -> description d'écran inventée).
+    """
+    try:
+        conn = _connect()
+        last = conn.execute(
+            "SELECT session_id, created_at FROM conversations ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not last:
+            conn.close()
+            return []
+        session_id, last_at = last
+        try:
+            age = datetime.now() - datetime.strptime(str(last_at)[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            age = timedelta(days=9999)
+        if age > timedelta(hours=max_age_hours):
+            conn.close()
+            return []
+        rows = conn.execute(
+            "SELECT role, content FROM conversations WHERE session_id = ? "
+            "AND role IN ('user', 'assistant') ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        conn.close()
+        messages = [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+        while messages and messages[-1]["role"] != "assistant":
+            messages.pop()           # question sans réponse : ne pas la reposer
+        while messages and messages[0]["role"] != "user":
+            messages.pop(0)          # commencer par l'utilisateur
+        return messages
+    except Exception as e:
+        log.warning("load_resume_messages failed: %s", e)
         return []
 
 

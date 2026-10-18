@@ -120,9 +120,10 @@ amah-agent/
 
 ## Vérifications après chaque modification (sans appel IA)
 ```bash
-py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 95/95 attendu
+py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 40/40 + 55/55 + 3/3 attendu
 py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
 py -3.13 -m benchmarks.benchmark_license       # licences : 11/11 attendu
+py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique : 11/11
 ```
 
 ## Installation et lancement
@@ -192,8 +193,15 @@ Llama 3.3 70B, Llama 3.1 8B et llama-4-scout ont été retirés par Groq (404).
    - mots-clés par catégorie + extension des chemins (.xlsx → Excel…)
    - rien de reconnu → lot de 10 outils de lecture (jamais 0 outil : sans
      outil, gpt-oss répond à vide ou invente des noms d'outils)
+   - information qui change (`_FRESH_FACTS` : dernier, nouveauté, version, prix,
+     actualité, année…) : web_search + read_webpage ajoutés si la question ne
+     porte pas sur des données locales (fichiers, emails, mémoire…), et
+     `forced_tool()` IMPOSE web_search (tool_choice) quand rien d'autre n'est
+     reconnu — sinon gpt-oss répond de mémoire avec des faits périmés
    - au plus 12 outils, 8 en moyenne
    - Mesuré : 100 % sur 40 phrases d'audit et 55 phrases nouvelles (V0.4 : 15-20 %)
+     + 3 régressions trouvées en vrai test ("dernière version de Python",
+     "prix du bitcoin" partaient sur code/utils sans web_search)
    - Tester sur des phrases DIFFÉRENTES des mots-clés : les anciens benchmarks
      reprenaient les phrases des motifs et mesuraient la mémorisation
 
@@ -315,16 +323,31 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Table memories : infos mémorisées explicitement (category, content) + résumés
   mis en cache par le rappel de mémoire (category = conversation_summary)
 - Table tool_usage : statistiques d'utilisation des outils (alimentée automatiquement)
-- Au démarrage : 10 derniers messages rechargés automatiquement
+- Au démarrage (`load_resume_messages`) : seulement la DERNIÈRE session, si
+  elle date de moins de 12 h, 10 messages user/assistant max, sans la question
+  restée sans réponse en fin de session (avant : 10 derniers messages de toutes
+  sessions, qui polluaient la réponse à "salut")
+- Conservation de l'historique réglable par le client (`AMAH_HISTORY_DAYS`,
+  écran de configuration : 30 jours / 90 jours / 1 an / Toujours = 0) ; défaut
+  365 jours. Avant : purge fixe de 90 jours à chaque démarrage, qui effaçait la
+  mémoire des conversations
 - Trimming contexte API : [system] + 40 derniers messages max
 - Troncature tool_results : 2000 chars en mémoire vive, 800 chars en DB
 
-## Coût en tokens
-- Prompt système + profil : ~3 700 tokens par appel (le poste le plus lourd)
-- Définitions d'outils : ~45 tokens par outil, 8 en moyenne par appel
-- agent.py reformule les résultats d'outils avec un prompt court
-  (RESPONSE_SYSTEM_PROMPT, config.py) sur gpt-oss-20b
-- Piste d'économie principale : raccourcir system_prompt.txt / user_profile.txt
+## Coût en tokens (mesuré le 18/10/2026)
+| Message | Prompt | Tokens |
+|---|---|---|
+| Conversation pure ("salut") | CHAT_SYSTEM_PROMPT (~214 tokens) | ~360 (3 722 avec SYSTEM_PROMPT) |
+| Question générale / action | SYSTEM_PROMPT + outils | ~4 100 |
+| Après 7 échanges | + historique (16 messages max) | +~550 |
+- Conversation pure = le routeur renvoie 0 outil (salutation, remerciement,
+  "qui es-tu", "que sais-tu faire") : gui.py, voice_fullscreen.py et agent.py
+  envoient alors `chat_messages()` (config.py) sur gpt-oss-20b
+- Avec 200 000 tokens/jour/clé : ~200-500 messages de conversation pure par
+  clé, ~45 questions/actions par clé (quota du 120b séparé)
+- agent.py reformule les résultats d'outils avec RESPONSE_SYSTEM_PROMPT sur gpt-oss-20b
+- Piste suivante : alléger SYSTEM_PROMPT (system_prompt.txt + user_profile.txt,
+  ~3 700 tokens) pour les questions générales
 
 ## Interfaces disponibles
 ### Terminal (agent.py) — usage développeur
@@ -340,7 +363,12 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 
 ### Fenêtre graphique (gui.py) — interface clients
 - Lance avec : py -3.13 gui.py
-- Écran de configuration premier lancement (3 clés Groq + licence + Gmail)
+- Écran de configuration premier lancement (3 clés Groq + licence + Gmail +
+  durée de conservation des conversations) : formulaire défilant, bouton
+  "Demarrer Amah" fixé en bas, hauteur limitée à l'écran, Entrée valide
+  (sur un portable 720 px à 125-133 %, le bouton sortait de la fenêtre)
+- Erreurs inattendues journalisées dans amah_errors.log (à côté du programme,
+  ~500 Ko max, gitignoré) : à demander au client en cas de souci
 - Réponses instantanées, rappel de mémoire, routeur partagé, boucle d'outils
   multi-étapes, conversation pure en streaming sur gpt-oss-20b
 - Fenêtre "Oui / Non" avant toute action sensible
@@ -602,6 +630,19 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   (collect_submodules), boto3 exclu. Zip 193 Mo ; démarrage 13-17 s (46 s en
   fichier unique). installer_navigateur.bat sans Python (Playwright embarqué).
   GUIDE_INSTALLATION.md mis à jour (dézipper, garder le dossier entier).
+
+## Etat — après le test réel du 18/10/2026
+- [x] Conversation pure sur un prompt court (CHAT_SYSTEM_PROMPT, ~214 tokens
+  au lieu de ~3 700) dans les 3 interfaces : ~10× moins de quota par "salut"
+- [x] Reprise de l'historique limitée à la dernière session récente
+- [x] web_search ajouté/imposé pour les questions d'actualité (testé en réel :
+  gpt-oss appelle web_search au lieu d'inventer)
+- [x] Conservation de l'historique réglable par client (AMAH_HISTORY_DAYS)
+- [x] Journal d'erreurs amah_errors.log (gui.py)
+- [x] Écran de configuration utilisable sur petit écran (bouton visible)
+- [ ] get_page_text renvoie surtout le menu des pages (inner_text du body) :
+  extraire main/article, et lire la page entière à voix haute sans troncature
+- [ ] Recompiler le .exe avec ces corrections (le zip actuel ne les a pas)
 
 ## Prochaines améliorations possibles
 - [ ] Démarrage du .exe (13 s) : charger OpenCV / Playwright / NumPy à la

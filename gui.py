@@ -13,15 +13,16 @@ from groq import Groq
 from groq_client import GroqClient, repair_tool_use_failed
 from dotenv import load_dotenv
 
-from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS
+from config import SYSTEM_PROMPT, MODEL, TOOLS_DEFINITIONS, chat_messages
 from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
-from tools.tool_router import select_tools
+from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply
 from tools.memory_context import memory_context, memory_instruction, SUMMARY_SYSTEM as MEMORY_SUMMARY_SYSTEM
 from tools.memory_recall_v024 import format_recall
 from tools.guard import set_confirm_handler, tk_confirm_handler
-from tools.memory import save_message, load_recent_messages, cleanup_old_messages, truncate_old_tool_results
+from tools.memory import (save_message, load_resume_messages, cleanup_old_messages,
+                          truncate_old_tool_results, history_retention_days)
 from webcam_monitor import WebcamMonitor
 
 # ── Couleurs ────────────────────────────────────────────────────────────────
@@ -124,6 +125,26 @@ TOOL_LABELS = {
 }
 
 
+# ── Journal d'erreurs ───────────────────────────────────────────────────────
+# Sans trace, une demande restée sans réponse était impossible à diagnostiquer
+# (test du 18/10 : deux messages renvoyés par l'utilisateur, cause inconnue).
+_ERROR_LOG = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+              else Path(__file__).resolve().parent) / "amah_errors.log"
+
+
+def _log_error(context: str, exc: BaseException) -> None:
+    """Ajoute l'erreur (avec la pile d'appels) à amah_errors.log, limité à ~500 Ko."""
+    try:
+        if _ERROR_LOG.exists() and _ERROR_LOG.stat().st_size > 500_000:
+            _ERROR_LOG.write_text(_ERROR_LOG.read_text(encoding="utf-8", errors="replace")[-250_000:],
+                                  encoding="utf-8")
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        with _ERROR_LOG.open("a", encoding="utf-8") as f:
+            f.write(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] {context}\n{trace}")
+    except Exception:
+        pass
+
+
 class AmahGUI:
     def __init__(self, root):
         self.root       = root
@@ -148,9 +169,9 @@ class AmahGUI:
         self._tools_this_call = []   # outils utilisés dans l'appel en cours
         self._voice_mode    = False  # True = réponse vocale automatique activée
 
-        cleanup_old_messages(days=90)          # purge messages > 90 jours
+        cleanup_old_messages()                 # durée choisie (AMAH_HISTORY_DAYS, 0 = toujours)
         truncate_old_tool_results(max_chars=800)  # tronque tool_results longs en DB
-        previous             = load_recent_messages(limit=10)  # 10 suffisent
+        previous             = load_resume_messages()  # dernière session si < 12 h
         self.messages        = [{"role": "system", "content": SYSTEM_PROMPT}] + previous
         self._previous_count = len(previous)
 
@@ -702,7 +723,8 @@ class AmahGUI:
         # "Tu te souviens de ce qu'on avait dit sur…" : rappel de l'historique
         try:
             memory, direct = memory_context(last_user, summarize_fn=self._summarize_memory)
-        except Exception:
+        except Exception as e:
+            _log_error(f"memoire | {last_user[:120]!r}", e)
             memory, direct = None, False
         if memory and direct:
             recalled = format_recall(memory)
@@ -728,6 +750,7 @@ class AmahGUI:
             save_message(self.session_id, "assistant", reply)
             self.root.after(0, finish, reply)
         except Exception as e:
+            _log_error(f"chat | {last_user[:120]!r}", e)
             self.root.after(0, self._show_error, self._format_error(str(e)))
         finally:
             # La mémoire ne sert qu'à ce tour : ne pas l'accumuler dans le prompt
@@ -766,8 +789,10 @@ class AmahGUI:
         full    = []
         started = [False]
         try:
+            # Prompt court (~200 tokens) : la conversation pure n'a pas besoin
+            # des règles d'outils de SYSTEM_PROMPT (~3 700 tokens par message).
             stream = self.groq.chat(
-                self.messages, model="openai/gpt-oss-20b",
+                chat_messages(self.messages), model="openai/gpt-oss-20b",
                 max_tokens=1024, temperature=0.4, stream=True,
                 on_status=lambda txt: self.root.after(0, self._set_status, txt),
             )
@@ -1116,7 +1141,7 @@ class AmahGUI:
     def _select_tools(self, message: str):
         """Outils à proposer (routeur partagé tools/tool_router.py), ou None pour
         une conversation pure (salutation, remerciement)."""
-        tools, _info = select_tools(message, TOOLS_DEFINITIONS)
+        tools, self._router_info = select_tools(message, TOOLS_DEFINITIONS)
         return tools or None
 
     def _trim_messages(self):
@@ -1131,13 +1156,14 @@ class AmahGUI:
             tail = tail[1:]
         self.messages = [system] + tail
 
-    def _groq_call(self, messages, tools=None, model_override=None):
+    def _groq_call(self, messages, tools=None, model_override=None, tool_choice=None):
         """Appel Groq via le client partage (rotation de cles + retry backoff geres
         de maniere centrale dans GroqClient — voir groq_client.py).
         model_override : force un modèle spécifique (ex: 8B pour questions simples)
+        tool_choice : outil imposé (ex. web_search pour une question d'actualité)
         """
         return self.groq.chat(
-            messages, model=model_override or MODEL, tools=tools,
+            messages, model=model_override or MODEL, tools=tools, tool_choice=tool_choice,
             max_tokens=4096, temperature=0.4,
             on_status=lambda txt: self.root.after(0, self._set_status, txt),
         )
@@ -1176,7 +1202,12 @@ class AmahGUI:
             self.root.after(0, self._set_status, "Amah reflechit (outils cibles)...")
 
         try:
-            response = self._groq_call(self.messages, tools=tools, model_override=active_model)
+            # Question d'actualité sans outil précis : recherche web imposée, sinon
+            # gpt-oss répond de mémoire avec des faits périmés (test du 18/10).
+            forced = forced_tool(last_user, tools or [], getattr(self, "_router_info", None))
+            choice = {"type": "function", "function": {"name": forced}} if forced else None
+            response = self._groq_call(self.messages, tools=tools, model_override=active_model,
+                                       tool_choice=choice)
         except Exception as e:
             # Quand le modele tente d'appeler un outil hors de la sous-liste
             # ciblee, Groq rejette l'appel avec une erreur 400 AVANT meme de
@@ -1317,6 +1348,10 @@ class AmahGUI:
 
 # ── Écran de configuration (premier lancement) ──────────────────────────────
 
+# Durées proposées dans l'écran de configuration -> AMAH_HISTORY_DAYS (0 = toujours)
+HISTORY_CHOICES = {"30 jours": 30, "90 jours": 90, "1 an": 365, "Toujours": 0}
+
+
 class SetupWindow:
     def __init__(self, root, on_complete, env_path):
         self.root        = root
@@ -1325,9 +1360,14 @@ class SetupWindow:
 
         self.root.title("Amah Agent — Configuration")
         self.root.configure(bg=BG_DARK)
-        self.root.geometry("660x680")
-        self.root.resizable(False, False)
+        self.root.resizable(False, True)
         self._build()
+        # Hauteur selon le contenu, sans dépasser l'écran (le formulaire défile)
+        self.root.update_idletasks()
+        need = sum(c.winfo_reqheight() for c in self.root.winfo_children()
+                   if c is not self._form_holder) + self._form.winfo_reqheight() + 4
+        self.root.geometry(f"660x{min(need, self.root.winfo_screenheight() - 90)}")
+        self.root.bind("<Return>", lambda e: self._save())
 
     def _build(self):
         hdr = tk.Frame(self.root, bg=BG_PANEL, pady=12)
@@ -1340,9 +1380,29 @@ class SetupWindow:
                  bg=BG_PANEL, fg=GOLD_DIM, font=("Consolas", 8)).pack()
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
-        # Scrollable si besoin
-        body = tk.Frame(self.root, bg=BG_DARK, padx=28, pady=14)
-        body.pack(fill=tk.BOTH, expand=True)
+        # Bas de fenêtre fixe : message d'erreur et bouton toujours visibles.
+        # Sur un portable de 720 px à 125-133 %, le formulaire demande ~920 px
+        # et le bouton "Demarrer Amah" sortait de la fenêtre (impossible de
+        # terminer la configuration).
+        footer = tk.Frame(self.root, bg=BG_DARK, pady=8)
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Formulaire défilant (barre + molette) si l'écran est trop petit
+        holder = tk.Frame(self.root, bg=BG_DARK)
+        holder.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(holder, bg=BG_DARK, highlightthickness=0)
+        scrollbar = tk.Scrollbar(holder, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        body = tk.Frame(canvas, bg=BG_DARK, padx=28, pady=14)
+        body_id = canvas.create_window((0, 0), window=body, anchor="nw")
+        self._form_holder, self._form = holder, body
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(body_id, width=e.width))
+        self.root.bind_all("<MouseWheel>",
+                           lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         # ── Section Groq ──────────────────────────────────────────────────────
         tk.Frame(body, bg=GOLD_DIM, height=1).pack(fill=tk.X, pady=(0, 10))
@@ -1359,11 +1419,11 @@ class SetupWindow:
         self.v_groq1 = tk.StringVar()
         tk.Entry(body, textvariable=self.v_groq1, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
 
-        self._lbl(body, "Cle Groq n2", "optionnel · 2eme compte = +100 000 tokens/jour")
+        self._lbl(body, "Cle Groq n2", "optionnel · 2e compte Groq = quota doublé")
         self.v_groq2 = tk.StringVar()
         tk.Entry(body, textvariable=self.v_groq2, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
 
-        self._lbl(body, "Cle Groq n3", "optionnel · 3eme compte = +100 000 tokens/jour")
+        self._lbl(body, "Cle Groq n3", "optionnel · 3e compte Groq = quota triplé")
         self.v_groq3 = tk.StringVar()
         tk.Entry(body, textvariable=self.v_groq3, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
 
@@ -1401,14 +1461,23 @@ class SetupWindow:
         self._lbl(body, "Mot de passe application Gmail",
                   "optionnel · Compte Google > Securite > Mots de passe des applications")
         self.v_pwd = tk.StringVar()
-        tk.Entry(body, textvariable=self.v_pwd, show="*", **self._es()).pack(fill=tk.X, pady=(0, 14))
+        tk.Entry(body, textvariable=self.v_pwd, show="*", **self._es()).pack(fill=tk.X, pady=(0, 10))
+
+        # Durée de conservation des conversations, choisie par chaque client
+        self._lbl(body, "Conserver les conversations",
+                  "Amah s'en sert pour se souvenir de vos échanges · modifiable ensuite dans .env")
+        self.v_history = tk.StringVar(value="1 an")
+        history_menu = tk.OptionMenu(body, self.v_history, *HISTORY_CHOICES)
+        history_menu.config(bg="#2a2a27", fg=GOLD, activebackground="#3a3a35", activeforeground=GOLD,
+                            relief=tk.FLAT, highlightthickness=0, font=("Consolas", 10), cursor="hand2")
+        history_menu.pack(anchor="w", pady=(0, 14))
 
         # ── Erreur + bouton ───────────────────────────────────────────────────
         self.v_err = tk.StringVar()
-        tk.Label(body, textvariable=self.v_err, bg=BG_DARK,
+        tk.Label(footer, textvariable=self.v_err, bg=BG_DARK,
                  fg=RED, font=("Consolas", 10)).pack(pady=(0, 6))
 
-        tk.Button(body, text="Demarrer Amah", bg=GOLD_DIM, fg=BG_DARK,
+        tk.Button(footer, text="Demarrer Amah", bg=GOLD_DIM, fg=BG_DARK,
                   font=("Consolas", 11, "bold"), relief=tk.FLAT,
                   padx=20, pady=6, cursor="hand2", command=self._save).pack()
 
@@ -1451,9 +1520,12 @@ class SetupWindow:
         lines.append(f"AMAH_LICENSE_KEY={licence}\n")
         if gmail:   lines.append(f"GMAIL_ADDRESS={gmail}\n")
         if pwd:     lines.append(f"GMAIL_APP_PASSWORD={pwd}\n")
+        lines.append(f"AMAH_HISTORY_DAYS={HISTORY_CHOICES[self.v_history.get()]}\n")
 
         self.env_path.write_text(''.join(lines), encoding='utf-8')
         load_dotenv(self.env_path, override=True)
+        self.root.unbind_all("<MouseWheel>")
+        self.root.unbind("<Return>")
         self.on_complete()
 
 
