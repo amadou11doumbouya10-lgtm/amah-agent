@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 MODEL = "openai/gpt-oss-120b"
@@ -21,7 +22,11 @@ SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8").format(
 
 # Profil utilisateur personnalise (user_profile.txt) -- charge si present.
 # Les lignes commentees (#) et les lignes vides sont ignorees.
-_PROFILE_PATH = Path(__file__).resolve().parent / "user_profile.txt"
+# Dans le .exe, à côté de l'exécutable (comme .env), pas dans le dossier
+# temporaire de PyInstaller où un client ne pourrait jamais le déposer.
+_PROFILE_DIR = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+                else Path(__file__).resolve().parent)
+_PROFILE_PATH = _PROFILE_DIR / "user_profile.txt"
 if _PROFILE_PATH.exists():
     _lines = [
         l.strip() for l in _PROFILE_PATH.read_text(encoding="utf-8").splitlines()

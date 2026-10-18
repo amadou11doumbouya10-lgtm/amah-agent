@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -6,8 +7,12 @@ a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[
+    # config.py lit system_prompt.txt au démarrage : sans lui, le .exe plantait
+    datas=[('system_prompt.txt', '.')],
+    # tools/__init__.py charge les outils par leur nom (importlib) : PyInstaller
+    # ne les voit pas, d'où collect_submodules (games, webcam, code_tools...
+    # manquaient dans l'ancienne liste écrite à la main).
+    hiddenimports=collect_submodules('tools') + [
         'groq',
         'rich',
         'rich.console',
@@ -75,27 +80,29 @@ a = Analysis(
     ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    # SDK Amazon (~20 Mo) tiré par speech_recognition pour recognize_lex /
+    # recognize_amazon, importé seulement dans ces fonctions ; Amah utilise
+    # recognize_google.
+    excludes=['boto3', 'botocore', 's3transfer'],
     cipher=block_cipher,
     noarchive=False,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Format dossier (onedir) : dist/Amah Agent/Amah Agent.exe + _internal/.
+# En fichier unique, le .exe décompressait ~480 Mo dans %TEMP% à chaque
+# lancement (~46 s de démarrage) ; ici les fichiers restent sur le disque.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='Amah Agent',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -103,4 +110,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='amah.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='Amah Agent',
 )

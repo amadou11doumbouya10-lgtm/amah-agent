@@ -1,5 +1,5 @@
 # Guide d'installation — Amah Agent
-*Version 1.4.2 — Juin 2026*
+*Version 1.5.2 — Octobre 2026*
 
 ---
 
@@ -7,22 +7,39 @@
 
 - Un PC Windows 10 ou Windows 11
 - Une connexion internet
+- Environ 450 Mo d'espace disque (plus ~170 Mo pour le navigateur)
 - Un microphone (optionnel, pour l'interface vocale)
 - 5 minutes
 
 ---
 
-## Étape 1 — Télécharger Amah Agent
+## Étape 1 — Installer Amah Agent
 
-Téléchargez le fichier `Amah Agent.exe` fourni par votre prestataire.  
-Placez-le dans un dossier de votre choix, par exemple :
+1. Téléchargez le fichier `Amah-Agent-v1.5.2.zip` fourni par votre prestataire.
+2. Faites un clic droit dessus → **Extraire tout…**, puis choisissez un dossier,
+   par exemple `C:\` :
 
 ```
 C:\Amah Agent\
-    └── Amah Agent.exe
+    ├── Amah Agent.exe          ← le programme à lancer
+    ├── _internal\              ← fichiers du programme (ne pas toucher)
+    ├── installer_navigateur.bat
+    └── GUIDE_INSTALLATION.md
 ```
 
-> Ne le placez pas dans un dossier système (Program Files, Windows, etc.)
+> Gardez le dossier **entier** : `Amah Agent.exe` ne fonctionne pas seul, il a
+> besoin du dossier `_internal` à côté de lui. Pour le lancer depuis le bureau,
+> faites un clic droit sur `Amah Agent.exe` → **Envoyer vers** → **Bureau
+> (créer un raccourci)**.
+>
+> Ne le placez pas dans un dossier système (Program Files, Windows, etc.).
+
+### Installer le navigateur (une seule fois)
+
+Les outils web d'Amah (ouvrir un site, remplir un formulaire…) utilisent leur
+propre navigateur. Double-cliquez sur `installer_navigateur.bat` dans le
+dossier et attendez la fin du téléchargement (~170 Mo). Sans cette étape, Amah
+fonctionne, mais sans les outils de navigation.
 
 ---
 
@@ -37,19 +54,21 @@ Amah utilise Groq pour son intelligence artificielle. C'est entièrement gratuit
 5. Donnez-lui un nom (ex: `Amah`) et copiez la clé générée
 
 > La clé ressemble à : `gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`  
-> **Conseil :** Créez jusqu'à 3 comptes gratuits pour tripler votre quota quotidien.
+> **Conseil :** une clé gratuite permet environ 40 demandes avec outils par jour.
+> Créez jusqu'à 3 comptes Groq gratuits et renseignez les 3 clés pour tripler
+> ce quota : Amah passe automatiquement à la clé suivante quand l'une est épuisée.
 
 ---
 
 ## Étape 3 — Premier lancement
 
-Double-cliquez sur `Amah Agent.exe`.
+Double-cliquez sur `Amah Agent.exe` dans le dossier `Amah Agent`.
 
 Un écran de configuration s'ouvre automatiquement :
 
 ```
 ┌────────────────────────────────────────────┐
-│   THE AMAH — PREMIER LANCEMENT  v1.4.2    │
+│   THE AMAH — PREMIER LANCEMENT  v1.5.2    │
 │   Configure tes accès pour démarrer       │
 ├────────────────────────────────────────────┤
 │                                            │
@@ -101,7 +120,11 @@ Amah démarre. La configuration est sauvegardée — vous n'aurez plus à la ref
 
 ## Utilisation quotidienne
 
-Double-cliquez sur `Amah Agent.exe` pour lancer Amah.
+Double-cliquez sur `Amah Agent.exe` (ou son raccourci sur le bureau) pour lancer Amah.
+
+Quand Amah va faire une action importante (supprimer ou déplacer un fichier,
+exécuter une commande, envoyer un email, couper le wifi…), une fenêtre vous
+demande votre accord. Rien n'est fait tant que vous n'avez pas cliqué **Oui**.
 
 ### Exemples de commandes (texte)
 - *"Lis mes 5 derniers emails"*
@@ -124,7 +147,9 @@ Cliquez sur le bouton **[◎]** dans la barre de saisie :
 
 | Problème | Solution |
 |----------|----------|
-| Windows bloque le .exe | Clic droit → "Exécuter quand même" |
+| Windows bloque le .exe | Cliquez sur "Informations complémentaires" → "Exécuter quand même" |
+| "Amah Agent.exe" ne démarre pas ou signale un fichier manquant | Le .exe a été sorti de son dossier : relancez-le depuis le dossier `Amah Agent` (avec `_internal` à côté) |
+| "Quota journalier Groq épuisé" | Les clés Groq gratuites ont atteint leur limite du jour : réessayez plus tard ou ajoutez une 2e/3e clé |
 | "Clé Groq invalide" | Vérifiez que vous avez bien copié toute la clé |
 | "Erreur Gmail" | Vérifiez que IMAP est activé dans Gmail |
 | Micro non détecté | Vérifiez que votre micro est branché et activé dans Windows |

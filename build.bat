@@ -1,6 +1,6 @@
 @echo off
 echo ================================================
-echo   Construction de Amah Agent.exe
+echo   Construction de Amah Agent (format dossier)
 echo ================================================
 echo.
 
@@ -12,30 +12,38 @@ if %errorlevel% neq 0 (
     echo.
 )
 
+:: Version (source unique : tools\updater.py)
+for /f "delims=" %%v in ('py -3.13 -c "from tools.updater import CURRENT_VERSION; print(CURRENT_VERSION)"') do set VERSION=%%v
+
 :: Nettoyage avant build
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
 
 :: Compilation
-echo Compilation en cours...
-py -3.13 -m PyInstaller amah.spec --clean
+echo Compilation de la v%VERSION% en cours (plusieurs minutes)...
+py -3.13 -m PyInstaller amah.spec --clean --noconfirm
 
 echo.
-if exist "dist\Amah Agent.exe" (
-    :: Copie les fichiers necessaires dans dist/
-    copy /y "installer_navigateur.bat" "dist\installer_navigateur.bat" >nul
-    copy /y "GUIDE_INSTALLATION.md"    "dist\GUIDE_INSTALLATION.md"    >nul
+if exist "dist\Amah Agent\Amah Agent.exe" (
+    :: Fichiers clients dans le dossier livre
+    copy /y "installer_navigateur.bat" "dist\Amah Agent\installer_navigateur.bat" >nul
+    copy /y "GUIDE_INSTALLATION.md"    "dist\Amah Agent\GUIDE_INSTALLATION.md"    >nul
+
+    :: Zip a envoyer au client
+    powershell -NoProfile -Command "Compress-Archive -Path 'dist\Amah Agent' -DestinationPath 'dist\Amah-Agent-v%VERSION%.zip' -Force"
 
     echo ================================================
-    echo   Succes ! Dossier dist\ pret a distribuer :
+    echo   Succes ! A livrer : dist\Amah-Agent-v%VERSION%.zip
     echo.
-    echo   dist\
-    echo   |-- Amah Agent.exe
-    echo   |-- installer_navigateur.bat
-    echo   |-- GUIDE_INSTALLATION.md
+    echo   dist\Amah Agent\
+    echo   ^|-- Amah Agent.exe          ^(a lancer^)
+    echo   ^|-- _internal\              ^(ne pas toucher^)
+    echo   ^|-- installer_navigateur.bat
+    echo   ^|-- GUIDE_INSTALLATION.md
     echo.
-    echo   IMPORTANT : Ajoute le fichier .env dans dist\
-    echo   avant de livrer au client.
+    echo   IMPORTANT : ajoute le fichier .env du client dans
+    echo   le dossier "Amah Agent" avant de zipper/livrer,
+    echo   ou laisse le client le creer au premier lancement.
     echo ================================================
 ) else (
     echo   ERREUR : le .exe n'a pas ete cree.
@@ -43,4 +51,4 @@ if exist "dist\Amah Agent.exe" (
 )
 
 echo.
-pause
+if not "%~1"=="--no-pause" pause

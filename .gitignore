@@ -74,6 +74,10 @@ voix/screens/
 voix/__pycache__/
 music/
 
+# Anciennes versions (agent, tools/*_v0x, benchmarks cassés) : gardées sur le
+# disque pour référence, jamais publiées
+archives/
+
 # Fichiers temporaires et tests
 test_*.py
 gui_old.py

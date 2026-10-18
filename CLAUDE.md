@@ -25,8 +25,9 @@ amah-agent/
 │                                 jamais publié ; modèle : user_profile.example.txt)
 ├── create_shortcut.py        ← Crée le raccourci .lnk sur le bureau
 ├── amah_memory.db            ← Base SQLite mémoire persistante (auto-créée)
-├── amah.spec                 ← Spec PyInstaller pour le packaging .exe
-├── build.bat                 ← Lance la compilation .exe en une commande
+├── amah.spec                 ← Spec PyInstaller : embarque system_prompt.txt et tous
+│                                 les modules tools/ (collect_submodules)
+├── build.bat                 ← Lance la compilation .exe en une commande (efface dist/)
 ├── installer_navigateur.bat  ← Installe Chromium pour les clients (1 seule fois)
 ├── GUIDE_INSTALLATION.md     ← Guide complet pour les clients
 ├── Guide_Installation_Client.docx ← Guide Word professionnel pour clients
@@ -101,14 +102,26 @@ amah-agent/
 ├── idees/                    ← Notes et idées du projet
 ├── analyse-ia/               ← Briefs pour analyse externe par d'autres IA
 ├── voix/                     ← Scripts et fichiers vidéos de présentation
-├── dist/                     ← Dossier de distribution (généré par build.bat)
-│   ├── Amah Agent.exe        (125 Mo, standalone, 99 outils, logo hexagone)
-│   ├── .env                  (Gmail pré-configuré, Groq à renseigner)
-│   ├── installer_navigateur.bat
-│   └── GUIDE_INSTALLATION.md
+├── dist/                     ← Généré par build.bat (format dossier)
+│   ├── Amah-Agent-v1.5.2.zip ← À livrer au client
+│   └── Amah Agent/
+│       ├── Amah Agent.exe    (lanceur, logo hexagone)
+│       ├── _internal/        (bibliothèques, system_prompt.txt — ne pas toucher)
+│       ├── installer_navigateur.bat (Chromium via le Playwright embarqué)
+│       └── GUIDE_INSTALLATION.md
+├── benchmarks/               ← Mesures et vérifications (voir benchmarks/README.md) ;
+│                                 à lancer depuis la racine : py -3.13 -m benchmarks.<nom>
+├── archives/                 ← Anciennes versions (agent, tools/*_v0x, benchmarks
+│                                 cassés, ancien .exe) — gitignoré, jamais publié
 ├── .env                      ← Clé API Groq + Gmail + Licence (NE PAS partager)
 ├── .env.example              ← Modèle à copier
 └── requirements.txt          ← Dépendances Python
+```
+
+## Vérifications après chaque modification (sans appel IA)
+```bash
+py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 95/95 attendu
+py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
 ```
 
 ## Installation et lancement
@@ -363,12 +376,20 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - UUID affiché + bouton Copier dans l'écran de config
 
 ## Distribution clients
-Le dossier dist/ contient tout ce qu'il faut livrer :
-- Amah Agent.exe (dernier build : 125 Mo, 65 outils, v1.3.0 — à recompiler en
-  v1.5.2 : l'ancien .exe utilise les modèles Llama retirés par Groq)
-- .env (Gmail pré-configuré, Groq + Licence à renseigner)
-- installer_navigateur.bat (Chromium, une seule fois)
-- GUIDE_INSTALLATION.md (guide complet)
+`build.bat` produit `dist/Amah-Agent-v<version>.zip` (format dossier PyInstaller) :
+- Le client dézippe le dossier `Amah Agent` et lance `Amah Agent.exe` ; le .exe
+  ne fonctionne pas sans `_internal/` à côté de lui
+- Format dossier choisi le 18/10/2026 : en fichier unique (208 Mo), le .exe
+  décompressait ~480 Mo dans %TEMP% à chaque lancement (~46 s de démarrage) et
+  ressemblait davantage à un logiciel malveillant pour les antivirus
+- `.env`, `user_profile.txt` et `amah_memory.db` sont lus/créés à côté du .exe ;
+  ne jamais zipper un dossier qui a déjà été lancé (il contiendrait la base)
+- installer_navigateur.bat utilise le Playwright embarqué
+  (`_internal/playwright/driver/node.exe`), sans Python chez le client
+- Gros postes de la taille : Playwright ~109 Mo, OpenCV ~103 Mo,
+  SpeechRecognition ~45 Mo, PyMuPDF ~42 Mo ; boto3/botocore exclus (inutiles)
+- La mise à jour automatique (`download_update`, non branchée aujourd'hui)
+  remplace un seul .exe : à adapter (zip) avant de l'activer
 
 ## Sécurité
 - **Garde-fou central (tools/guard.py)** : chaque outil de TOOL_FUNCTIONS y
@@ -553,10 +574,18 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   local variable 'repair_tool_use_failed'" (import local, depuis 9fe1cc1)
 - [ ] Refaire la série complète de scénarios gui.py (interrompue par le quota
   journalier Groq le 14/10)
-- [ ] Rangement (étape 4) : benchmarks dans benchmarks/, archiver sauvegardes et
-  ~30 tools/*_v0x inutilisés, recompiler le .exe v1.5.2
+- [x] Rangement : benchmarks dans benchmarks/ (+ benchmark_tool_router et
+  benchmark_guard, sans appel IA), sauvegardes / ~24 tools/*_v0x morts /
+  benchmarks cassés dans archives/ (gitignoré)
+- [x] **.exe v1.5.2 recompilé au format dossier** : system_prompt.txt embarqué
+  (le .exe aurait planté), 11 modules d'outils qui manquaient inclus
+  (collect_submodules), boto3 exclu. Zip 193 Mo ; démarrage 13-17 s (46 s en
+  fichier unique). installer_navigateur.bat sans Python (Playwright embarqué).
+  GUIDE_INSTALLATION.md mis à jour (dézipper, garder le dossier entier).
 
 ## Prochaines améliorations possibles
+- [ ] Démarrage du .exe (13 s) : charger OpenCV / Playwright / NumPy à la
+  demande plutôt qu'à l'ouverture de gui.py
 - [ ] Raccourcir le prompt système (~3 700 tokens/appel) : principal levier
   pour dépasser ~40 demandes avec outils par clé et par jour
 - [ ] agent.py : enchaîner plusieurs outils ("fais X puis Y") comme gui.py
