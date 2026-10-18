@@ -145,6 +145,21 @@ def _log_error(context: str, exc: BaseException) -> None:
         pass
 
 
+def _fit_window(root, width: int, height: int) -> int:
+    """Taille réduite à l'écran puis fenêtre centrée ; renvoie la hauteur retenue.
+
+    Sans position imposée, Windows place la fenêtre ~130 px sous le haut de
+    l'écran : sur un portable de 720 px, le bas (bouton, barre de saisie)
+    finissait sous la barre des tâches. 110 px de marge = barre de titre
+    (~31) + barre des tâches (~48) + bordures.
+    """
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    width, height = min(width, sw - 20), min(height, sh - 110)
+    x, y = max(0, (sw - width) // 2), max(0, (sh - 80 - height) // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    return height
+
+
 class AmahGUI:
     def __init__(self, root):
         self.root       = root
@@ -152,7 +167,7 @@ class AmahGUI:
         set_confirm_handler(tk_confirm_handler(self.root))
         self.root.title("The Amah — Agent Local")
         self.root.configure(bg=BG)
-        self.root.geometry("980x700")
+        _fit_window(self.root, 980, 700)
         self.root.minsize(760, 520)
 
         # Client Groq partage (singleton) — rotation de cles + backoff geres
@@ -1366,7 +1381,7 @@ class SetupWindow:
         self.root.update_idletasks()
         need = sum(c.winfo_reqheight() for c in self.root.winfo_children()
                    if c is not self._form_holder) + self._form.winfo_reqheight() + 4
-        self.root.geometry(f"660x{min(need, self.root.winfo_screenheight() - 90)}")
+        _fit_window(self.root, 660, need)
         self.root.bind("<Return>", lambda e: self._save())
 
     def _build(self):
@@ -1381,7 +1396,7 @@ class SetupWindow:
         tk.Frame(self.root, bg=GOLD_DIM, height=1).pack(fill=tk.X)
 
         # Bas de fenêtre fixe : message d'erreur et bouton toujours visibles.
-        # Sur un portable de 720 px à 125-133 %, le formulaire demande ~920 px
+        # Sur un écran de 720 px de haut, le formulaire demande ~920 px
         # et le bouton "Demarrer Amah" sortait de la fenêtre (impossible de
         # terminer la configuration).
         footer = tk.Frame(self.root, bg=BG_DARK, pady=8)
@@ -1542,7 +1557,7 @@ class LicenseWindow:
 
         self.root.title("Amah Agent — Activation requise")
         self.root.configure(bg=BG_DARK)
-        self.root.geometry("640x440")
+        _fit_window(self.root, 640, 440)
         self.root.resizable(False, False)
         self._build()
 
@@ -1664,9 +1679,8 @@ def main():
     def launch_amah():
         for w in root.winfo_children():
             w.destroy()
-        root.geometry("960x700")
         root.resizable(True, True)
-        AmahGUI(root)
+        AmahGUI(root)      # taille et position : _fit_window dans AmahGUI
 
     def check_license():
         from tools.license import is_licensed

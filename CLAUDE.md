@@ -366,7 +366,12 @@ start_auto_mute, stop_auto_mute (coupe le son si 2+ personnes détectées)
 - Écran de configuration premier lancement (3 clés Groq + licence + Gmail +
   durée de conservation des conversations) : formulaire défilant, bouton
   "Demarrer Amah" fixé en bas, hauteur limitée à l'écran, Entrée valide
-  (sur un portable 720 px à 125-133 %, le bouton sortait de la fenêtre)
+  (sur un écran de 720 px de haut, le formulaire demande ~920 px et le
+  bouton sortait de la fenêtre)
+- Toutes les fenêtres passent par `_fit_window()` (taille réduite à l'écran
+  + centrage) : sans position imposée, Windows les plaçait ~130 px plus bas
+  et, sur un écran de 720 px, le bas (bouton, barre de saisie) finissait sous
+  la barre des tâches — vu seulement en lançant le .exe, pas dans les mesures Tk
 - Erreurs inattendues journalisées dans amah_errors.log (à côté du programme,
   ~500 Ko max, gitignoré) : à demander au client en cas de souci
 - Réponses instantanées, rappel de mémoire, routeur partagé, boucle d'outils
@@ -642,7 +647,9 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
 - [x] Écran de configuration utilisable sur petit écran (bouton visible)
 - [ ] get_page_text renvoie surtout le menu des pages (inner_text du body) :
   extraire main/article, et lire la page entière à voix haute sans troncature
-- [ ] Recompiler le .exe avec ces corrections (le zip actuel ne les a pas)
+- [x] .exe recompilé avec ces corrections (zip 185 Mo) : testé depuis le zip
+  décompressé dans un dossier vierge — écran de configuration en ~10 s,
+  entièrement visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
 
 ## Prochaines améliorations possibles
 - [ ] Démarrage du .exe (13 s) : charger OpenCV / Playwright / NumPy à la
