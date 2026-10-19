@@ -74,8 +74,8 @@ amah-agent/
 │   ├── memory.py             ← Mémoire SQLite persistante (3 outils)
 │   ├── email_tool.py         ← Email Gmail SMTP/IMAP (3 outils)
 │   ├── browser.py            ← Navigation web Playwright (5 outils)
-│   ├── voice.py              ← Synthèse vocale edge-tts (voix Henri), repli
-│   │                            Windows System.Speech si edge-tts echoue (1 outil)
+│   ├── voice.py              ← LA voix d'Amah partout : Henri (edge-tts), jouée
+│   │                            dans le processus (MCI) ; repli voix Windows (1 outil)
 │   ├── notifications.py      ← Notifications + rappels (2 outils)
 │   ├── excel.py              ← Lecture/création Excel (3 outils)
 │   ├── clipboard.py          ← Presse-papiers (2 outils)
@@ -117,6 +117,7 @@ amah-agent/
 │       ├── _internal/        (bibliothèques, system_prompt.txt — ne pas toucher)
 │       ├── installer_navigateur.bat (Chromium via le Playwright embarqué)
 │       └── GUIDE_INSTALLATION.md
+├── models/                   ← Modèle Vosk du mot de réveil (66 Mo, gitignoré)
 ├── benchmarks/               ← Mesures et vérifications (voir benchmarks/README.md) ;
 │                                 à lancer depuis la racine : py -3.13 -m benchmarks.<nom>
 ├── archives/                 ← Anciennes versions (agent, tools/*_v0x, benchmarks
@@ -137,6 +138,9 @@ py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code Powe
 py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
 py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales : 21/21
 py -3.13 -m benchmarks.benchmark_interfaces --sans-ia   # 3 interfaces, demandes sans IA : 12/12
+# Tes vraies phrases (benchmarks/mes_conversations.json, LOCAL et gitignoré :
+# conversations personnelles, jamais publié) ; --extraire ajoute les nouvelles
+py -3.13 -m benchmarks.benchmark_mes_conversations      # 18/10 : 103/131
 # Avec appels IA (~150 000 tokens, à espacer) : les 3 interfaces sur 10 demandes,
 # test de référence du plan Amah Core (18/10 : 10/10, 10/10, 9/10)
 py -3.13 -m benchmarks.benchmark_interfaces
@@ -234,6 +238,11 @@ create_word, create_txt, create_pdf, read_document
 ### Recherche — tools/search.py (2)
 web_search (DuckDuckGo + cache LRU 10min), read_webpage (contenu principal,
 6 000 caractères ; pages compressées gzip décodées)
+Adresse dictée mal transcrite : url_variants() essaie la variante avec tirets
+sur les hébergeurs à un seul niveau de sous-domaine (vercel.app, netlify.app,
+github.io…) — "campusmarket.nu.vercel.app" → "campusmarket-nu.vercel.app".
+Utilisé par read_webpage/fetch_main_text et open_browser (nouvel onglet), avec
+une "note" pour que le modèle signale la correction.
 
 ### Système — tools/system.py (4)
 get_system_info, open_file, run_command (PowerShell filtré par expressions
@@ -259,7 +268,17 @@ dans un nouveau fil — "ouvre X" marchait puis "lis la page" échouait ("cannot
 switch to a different thread"). get_page_text renvoie le contenu principal.
 
 ### Voix — tools/voice.py (1)
-speak(text, speed) — edge-tts (voix Henri, fr-FR), repli Windows TTS hors ligne si echec
+speak(text, speed) — LA voix d'Amah, partout (réponses de l'interface vocale,
+lecture de pages, fenêtre) : Henri (edge-tts fr-FR, ~1,5 s de préparation par
+Internet), joué directement par Windows MCI (plus de PowerShell : plusieurs
+secondes de démarrage en moins), lecture arrêtée à la fin de la parole (edge-tts
+ajoute ~0,5 s de silence). Sans Internet : voix Windows (SAPI via comtypes,
+dans le processus). stop_voice() coupe l'une ou l'autre.
+Avant (18/10/2026) : l'interface vocale parlait avec la voix Windows Hortense
+via pyttsx3 — qui ne parle qu'UNE fois sous Windows (2e phrase muette, sans
+erreur) — et la lecture avec Henri : deux voix pour la même Amah.
+Mode Live (Gemini) : voix Gemini (Charon), Henri impossible sans perdre le
+temps réel ; échantillons de voix Gemini dans le dossier « Voix Amah » du Bureau.
 
 ### Lecture à voix haute — tools/reader.py (1)
 read_aloud(url, stop) — lit TOUT le contenu principal d'une page en arrière-plan,
@@ -485,6 +504,16 @@ n'est importé avant l'affichage — à garder ainsi (mesurer avec
   (prévus par l'étape 1 du plan Amah Core)
 - F11 : plein écran/fenêtré, Échap ou "ferme" : quitter
 
+### Journal de session (tools/journal.py, AMAH_JOURNAL=1)
+amah_journal.txt (à côté du programme, gitignoré : contient les conversations)
+montre ce qui se passe quand on parle à Amah, dans les 3 interfaces et le mot
+de réveil : phrase dite (ou entendue par Google) ou écrite, décision (réponse
+instantanée, rappel de mémoire, outils proposés), chaque appel IA (modèle,
+durée, tokens), chaque outil (paramètres, résultat, durée, REFUSÉ), réponse et
+total de l'échange. Points centraux : GroqClient.chat, registre TOOL_FUNCTIONS
+(_journaled), instant_reply. Désactivé par défaut (AMAH_JOURNAL=0) ; jamais
+écrit par les benchmarks (benchmarks/__init__.py force AMAH_JOURNAL=0).
+
 ### Compréhension vocale (testée le 18/10/2026, benchmark_voice)
 Toutes les entrées vocales utilisent la reconnaissance Google fr-FR :
 interface vocale (écoute de 12 s, 6 s avant), mot de réveil (3 s), bouton
@@ -502,8 +531,22 @@ les erreurs venaient de ce qu'Amah faisait du texte :
 Non testé : capture réelle du micro, ta voix et ton accent, mode Live Gemini.
 
 ### Mot de réveil "Amah" (amah_listener.py)
-- Widget discret en bas à droite, détection par distance de Levenshtein
-- Dire "Amah" lance automatiquement voice_fullscreen.py
+- Widget discret en bas à droite ; dire "Amah" (ou cliquer le widget) ouvre
+  voice_fullscreen.py
+- **Détection hors ligne par Vosk** (modèle models/vosk-model-small-fr-0.22,
+  66 Mo, gitignoré — télécharger depuis alphacephei.com/vosk/models) : liste de
+  mots restreinte (WAKE_GRAMMAR) avec "ama" (prononciation de Amah, connu du
+  vocabulaire) entouré de mots concurrents qui lui ressemblent ("arrête",
+  "fais-moi", "ami"…) ; réveil si "ama" est le PREMIER mot, confiance >= 0,85.
+  Mesuré : 6/6 voix de synthèse, 4/4 vrais enregistrements de l'utilisateur
+  (que Google ne comprenait pas), 0/48 faux réveils. Sans Vosk/modèle : repli
+  Google (_listen_loop_google).
+- Pourquoi : Google reconnaît mal un prénom court dit seul ("rien compris" à
+  presque chaque essai avec la vraie voix, 18/10/2026)
+- Bugs corrigés le 18/10 : pause_threshold 0,25 < non_speaking_duration →
+  AssertionError, l'écoute était MORTE depuis la v1.5.1 ; seuil trop haut pour
+  la voix à distance normale ; reconnaissance Google sans limite de temps
+  (operation_timeout) qui figeait l'écoute pour toujours
 
 ### 🆕 Mode Live temps réel (Gemini, touche F9 dans voice_fullscreen.py)
 - Bascule HUD violet "MODE LIVE · GEMINI"
@@ -785,6 +828,19 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   décompressé dans un dossier vierge — configuration en 1,7-5,3 s, fenêtre
   principale en 2,6-3,9 s, briefing du jour OK, aucune erreur ; entièrement
   visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
+
+## À corriger (test vocal réel du 18/10/2026, vu dans amah_journal.txt)
+- [ ] Date du jour absente du prompt : le modèle cherchait l'actualité "2024"
+- [ ] Historique de l'interface vocale trop lourd : les résultats d'outils
+  (page lue…) restent et sont renvoyés à chaque demande (4 500 → 7 600 tokens)
+- [ ] Bavardage non reconnu ("salut Hama", "ama", "ouais ça va et toi") :
+  ~4 500 tokens au lieu de ~400 ; "à moi" seul → le 20b répète l'heure d'avant
+- [ ] "Quelle heure en Amérique" → réponse instantanée avec l'heure locale
+- [ ] analyze_screen avec question vide → la vision répond en chinois
+- [ ] Transcriptions Google à corriger : "chant de texte" / "chat de test" pour
+  "champ de texte", "à moi" pour "Amah"
+- [ ] Les 28 échecs de benchmark_mes_conversations (adresses web, projets →
+  mémoire, "recommande" → run_command, analyse d'écran → documents…)
 
 ## Prochaines améliorations possibles
 - [ ] Raccourcir le prompt système (~3 700 tokens/appel) : principal levier

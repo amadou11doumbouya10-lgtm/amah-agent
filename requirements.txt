@@ -26,3 +26,4 @@ google-genai
 edge-tts>=7.3.1
 openai
 cryptography
+vosk>=0.3.45       # mot de réveil hors ligne (amah_listener.py) + modèle models/vosk-model-small-fr-0.22

@@ -49,6 +49,7 @@ def run_one(mode: str):
     """Déroule les scénarios dans CE processus pour une interface (une ligne JSON chacun)."""
     from dotenv import load_dotenv
     load_dotenv(".env")
+    os.environ["AMAH_JOURNAL"] = "0"        # les tests n'écrivent pas dans ton journal
     T = os.path.join(tempfile.gettempdir(), "amah_banc_interfaces").replace("\\", "/")
     os.makedirs(T, exist_ok=True)
     open(f"{T}/a_supprimer.txt", "w", encoding="utf-8").write("fichier de test")

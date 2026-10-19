@@ -1,5 +1,6 @@
 import functools
 import importlib
+import time
 
 # Source unique de TOOL_FUNCTIONS : chaque entrée associe un module à la liste
 # des fonctions qu'il expose comme outils pour l'agent. Le dict est construit
@@ -89,6 +90,21 @@ def resolve_tool_name(name) -> str:
     return raw
 
 
+def _journaled(name, func):
+    """Note chaque outil (paramètres, résultat, durée, refus) dans le journal de
+    session quand AMAH_JOURNAL=1 (tools/journal.py)."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        from tools import journal
+        if not journal.enabled():
+            return func(*args, **kwargs)
+        started = time.time()
+        result = func(*args, **kwargs)
+        journal.tool(name, kwargs, result, time.time() - started)
+        return result
+    return wrapper
+
+
 def _counted(name, func):
     """Enregistre chaque exécution réelle pour get_stats."""
     @functools.wraps(func)
@@ -105,6 +121,6 @@ TOOL_FUNCTIONS = _ToolRegistry()
 for _module_name, _tool_names in _TOOL_MODULES:
     _module = importlib.import_module(_module_name)
     for _tool_name in _tool_names:
-        TOOL_FUNCTIONS[_tool_name] = guarded(
+        TOOL_FUNCTIONS[_tool_name] = _journaled(_tool_name, guarded(
             _tool_name, _counted(_tool_name, getattr(_module, _tool_name))
-        )
+        ))

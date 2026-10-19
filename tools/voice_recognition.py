@@ -15,6 +15,7 @@ def listen(timeout: int = 7, language: str = "fr-FR") -> dict:
 
         recognizer = sr.Recognizer()
         recognizer.pause_threshold = 1.0          # tolère les pauses dans une phrase
+        recognizer.operation_timeout = 10         # sans limite, un réseau muet figeait l'écoute
         recognizer.dynamic_energy_threshold = True # s'adapte au bruit ambiant en temps réel
         recognizer.energy_threshold = 300
 
@@ -52,6 +53,7 @@ def listen_continuous(duration: int = 10, language: str = "fr-FR") -> dict:
         recognizer = sr.Recognizer()
         recognizer.dynamic_energy_threshold = True
         recognizer.pause_threshold = 1.2
+        recognizer.operation_timeout = 10
 
         with sr.Microphone() as source:
             recognizer.adjust_for_ambient_noise(source, duration=1.0)

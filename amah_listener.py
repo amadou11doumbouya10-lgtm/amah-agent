@@ -22,6 +22,40 @@ _env = (Path(sys.executable).parent / ".env"
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
 
+# ── Mot de réveil hors ligne (Vosk) ─────────────────────────────────────────
+# Google transcrit mal "Amah" dit seul (prénom court et rare) : avec la vraie
+# voix de l'utilisateur, presque toujours "rien compris" (test du 18/10/2026).
+# Vosk tourne sur le PC avec une liste de mots restreinte : il ne cherche que
+# "ama" — mot connu de son vocabulaire, prononcé comme "Amah" — au milieu de
+# mots concurrents qui lui ressemblent ("arrête", "fais-moi", "ami"…), sinon
+# "arrête la lecture" ou "fais-moi le point" réveillaient Amah. Mesuré : 6/6
+# réveils (voix de synthèse), 4/4 sur les vrais enregistrements de
+# l'utilisateur que Google ne comprenait pas, 0/48 faux réveils.
+# Sans Vosk ou sans modèle : repli automatique sur Google.
+VOSK_MODEL = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+              else Path(__file__).parent) / "models" / "vosk-model-small-fr-0.22"
+WAKE_GRAMMAR = [
+    "ama",
+    # Concurrents : sons proches de "ama" qui doivent gagner à sa place
+    "arrête", "arrêter", "fais", "fait", "moi", "ami", "amis", "amie", "allô", "alors",
+    "allez", "mais", "madame", "maman", "la", "le", "les", "point", "à", "au", "avec",
+    "aussi", "merci", "comment", "quelle", "qui", "quoi", "tu", "je", "est", "il",
+    "elle", "oui", "non", "salut", "bonjour",
+    "[unk]",
+]
+WAKE_MIN_CONFIDENCE = 0.85
+
+
+def vosk_wake(result: dict):
+    """Résultat Vosk -> (réveil ?, confiance de "ama" ou None). Le nom doit être
+    le PREMIER mot (on appelle Amah avant de parler) : "au revoir Amah" ne
+    réveille pas."""
+    words = result.get("result") or []
+    if not words or words[0].get("word") != "ama":
+        return False, None
+    conf = float(words[0].get("conf", 0))
+    return conf >= WAKE_MIN_CONFIDENCE, conf
+
 
 def _already_running() -> bool:
     """Vérifie si une autre instance de amah_listener.py tourne déjà.
@@ -64,6 +98,8 @@ WAKE_WORDS = {
     # Transcription Google la plus fréquente de "Amah" (banc vocal du
     # 18/10/2026 : 6 fois sur 8 avec les voix Henri et Denise)
     "hama", "hamma", "amma",
+    # Voix réelle de l'utilisateur (test du 18/10/2026)
+    "ahma",
 }
 
 
@@ -216,26 +252,124 @@ class ListenerWidget:
     # ── Boucle de reconnaissance ──────────────────────────────────────────────
 
     def _listen_loop(self):
+        """Écoute du mot de réveil : Vosk hors ligne, sinon Google."""
+        try:
+            import pyaudio
+            from vosk import KaldiRecognizer, Model, SetLogLevel
+            if not VOSK_MODEL.exists():
+                raise FileNotFoundError(f"modèle Vosk absent : {VOSK_MODEL}")
+        except Exception as e:
+            self._last_text = f"repli Google ({type(e).__name__})"
+            return self._listen_loop_google()
+        try:
+            from tools import journal          # journal de session (AMAH_JOURNAL=1)
+        except Exception:
+            journal = None
+
+        import json
+        SetLogLevel(-1)
+        try:
+            self._set("CALIB", CYAN_DIM)
+            model = Model(str(VOSK_MODEL))
+            rate = 16000
+            rec = KaldiRecognizer(model, rate, json.dumps(WAKE_GRAMMAR, ensure_ascii=False))
+            rec.SetWords(True)
+            pa = pyaudio.PyAudio()
+            stream = pa.open(format=pyaudio.paInt16, channels=1, rate=rate,
+                             input=True, frames_per_buffer=4000)
+        except Exception as e:
+            self._last_text = f"micro : {str(e)[:30]}"
+            self._set("ERREUR", RED)
+            try:
+                from tools.conversation import log_error
+                log_error("mot de réveil | Vosk / micro", e)
+            except Exception:
+                pass
+            return
+
+        self._set("ECOUTE", CYAN_DIM)
+        was_open = False
+        try:
+            while self._running:
+                data = stream.read(4000, exception_on_overflow=False)   # 0,25 s
+                if self._voice_open:
+                    was_open = True        # l'interface vocale écoute à sa place
+                    continue
+                if was_open:
+                    was_open = False
+                    rec.Reset()
+                if not rec.AcceptWaveform(data):
+                    continue
+                result = json.loads(rec.Result())
+                woke, conf = vosk_wake(result)
+                if conf is None:
+                    continue               # pas de "ama" en tête : rien à noter
+                heard = f"ama (confiance {conf:.2f}, hors ligne)".replace(".", ",", 1)
+                self._last_text = "ama"
+                if journal:
+                    journal.wake(heard, woke)
+                if woke:
+                    self._set("DETECTION", CYAN)
+                    self.root.after(0, self._open_voice)
+                    time.sleep(2)
+                    rec.Reset()
+                else:
+                    self._set("ECOUTE", CYAN_DIM)
+        finally:
+            try:
+                stream.close()
+                pa.terminate()
+            except Exception:
+                pass
+
+    def _listen_loop_google(self):
+        """Repli sans Vosk : reconnaissance Google de chaque phrase entendue."""
         try:
             import speech_recognition as sr
         except ImportError:
             self._set("ERREUR", RED)
             return
+        try:
+            from tools import journal          # journal de session (AMAH_JOURNAL=1)
+        except Exception:
+            journal = None
 
         r   = sr.Recognizer()
         r.energy_threshold         = 150
         r.dynamic_energy_threshold = False  # seuil fixe — evite que le bruit ambiant monte le seuil trop haut
-        r.pause_threshold          = 0.25
+        # Test avec la vraie voix (18/10/2026) :
+        # - pause_threshold 0,25 (v1.5.1) < non_speaking_duration 0,5 par défaut :
+        #   AssertionError au calibrage, le fil d'écoute s'arrêtait sans message
+        #   et le widget n'écoutait plus rien depuis la v1.5.1 (06/08/2026) ;
+        # - 0,25 s de pause hachait aussi "Amah" en fragments que Google ne
+        #   comprenait pas : 0,5 s (valeur d'origine), 0,4 s gardée avant la voix.
+        r.pause_threshold          = 0.5
+        # Reconnaissance Google : 6 s maximum (sans limite, une réponse réseau
+        # perdue figeait l'écoute pour toujours — vu le 18/10/2026)
+        r.operation_timeout        = 6
+        r.non_speaking_duration    = 0.4
 
         try:
             mic = sr.Microphone()
-        except Exception:
+            self._set("CALIB", CYAN_DIM)
+            with mic as src:
+                r.adjust_for_ambient_noise(src, duration=0.5)
+            # Seuil proche de celui de l'interface vocale (le niveau de la pièce,
+            # ~80), qui entend bien l'utilisateur. Un plancher à 300 ratait sa
+            # voix à distance normale du micro (aucun appel capté pendant 7 min,
+            # test du 18/10/2026) ; les petits bruits ne hachent plus la voix
+            # depuis que la pause est à 0,5 s, au pire un "rien compris".
+            r.energy_threshold = max(r.energy_threshold * 1.2, 120)
+        except Exception as e:
+            # Micro absent, occupé ou refusé : le dire au lieu d'un widget muet
+            self._last_text = f"micro : {str(e)[:30]}"
             self._set("ERREUR", RED)
+            try:
+                from tools.conversation import log_error
+                log_error("mot de réveil | ouverture du micro", e)
+            except Exception:
+                pass
             return
-
-        self._set("CALIB", CYAN_DIM)
-        with mic as src:
-            r.adjust_for_ambient_noise(src, duration=0.5)
 
         self._set("ECOUTE", CYAN_DIM)
 
@@ -252,11 +386,15 @@ class ListenerWidget:
                 try:
                     text = r.recognize_google(audio, language="fr-FR").lower().strip()
                 except sr.UnknownValueError:
-                    pass
+                    if journal:
+                        journal.wake("", False)
 
                 if text:
                     self._last_text = text
-                    if self._is_wake(text):
+                    woke = self._is_wake(text)
+                    if journal:
+                        journal.wake(text, woke)
+                    if woke:
                         self._set("DETECTION", CYAN)
                         self.root.after(0, self._open_voice)
                         time.sleep(2)
@@ -290,6 +428,11 @@ class ListenerWidget:
     def _is_wake(self, text: str) -> bool:
         """Vérifie si le texte contient une variante du mot de réveil "Amah"."""
         words = text.lower().split()
+        # "Amah" dit rapidement (~0,4 s) est transcrit "am" (voix réelle, test du
+        # 18/10/2026 : 2 fois sur 4) ; accepté en premier mot seulement, pas au
+        # milieu d'une phrase, pour éviter les faux réveils
+        if words and words[0].strip(".,!?") == "am":
+            return True
         for w in words:
             w = w.strip(".,!?")
             if not w:

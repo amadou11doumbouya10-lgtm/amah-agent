@@ -21,6 +21,7 @@ cas d'échec :
 | `benchmark_injection.py` | Aucun texte externe dans le code PowerShell (notification, repli vocal, presse-papiers). Attendu : 13/13. |
 | `benchmark_initiatives.py` | Emails importants, alertes (nouveaux emails seulement), briefing du jour. Attendu : 18/18. |
 | `benchmark_conversation.py` | Briques communes aux 3 interfaces (troncature, coupure de l'historique, texte pour la voix), confirmations du terminal, et compréhension des transcriptions vocales réelles (mot de réveil, fermeture, calcul dicté). Attendu : 21/21. |
+| `benchmark_mes_conversations.py` | **Tes vraies phrases** (historique d'Amah) : ce qu'Amah en comprend aujourd'hui comparé au comportement attendu. Les phrases sont dans `mes_conversations.json`, **local et gitignoré** (conversations personnelles) ; `--extraire` ajoute les nouvelles phrases à étiqueter. 18/10/2026 : 103/131. |
 | `benchmark_interfaces.py --sans-ia` | Les demandes qui ne doivent jamais appeler l'IA (heure, briefing, lecture, arrêt) dans les 3 interfaces. Attendu : 12/12. |
 
 Pour le routeur, n'ajoute pas un mot-clé juste pour faire passer une phrase du

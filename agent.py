@@ -49,6 +49,7 @@ from tools.memory_context import (
     normalize_for_matching as _normalize_for_matching,
 )
 from tools.instant import datetime_request_kind, instant_reply as shared_instant_reply
+from tools import journal
 
 
 
@@ -1671,6 +1672,7 @@ def chat(
 
 
 def main():
+    journal.session("terminal")
     api_key = os.getenv(
         "GROQ_API_KEY"
     )
@@ -1896,6 +1898,7 @@ def main():
                 spinner="dots",
                 spinner_style="#7a5f38",
             ):
+                journal.start("terminal", user_input, spoken=voice_turn)
                 try:
                     reply = chat(
                         client,
@@ -1903,9 +1906,11 @@ def main():
                         conversation_context,
                         voice_turn=voice_turn,
                     )
+                    journal.end(reply)
                 except Exception as exc:
                     # Une erreur API/outil ne doit pas fermer la session.
                     reply = f"Désolé, une erreur est survenue : {exc}"
+                    journal.end(reply, error=True)
 
             messages.append(
                 {

@@ -97,13 +97,54 @@ def fetch_page_html(url: str) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
+# Hébergeurs dont les sites n'ont qu'UN niveau de sous-domaine (nom-du-site.vercel.app)
+_PLATFORM_SUFFIXES = ("vercel.app", "netlify.app", "github.io", "pages.dev", "web.app",
+                      "firebaseapp.com", "onrender.com", "herokuapp.com", "surge.sh",
+                      "glitch.me", "replit.app", "railway.app", "fly.dev")
+
+
+def url_variants(url: str) -> list:
+    """Autres écritures probables d'une adresse dictée à voix haute.
+
+    La reconnaissance vocale écrit souvent un tiret comme un point :
+    "campusmarket-nu.vercel.app" devient "campusmarket.nu.vercel.app", une
+    adresse qui n'existe pas (test réel du 18/10/2026). Sur ces hébergeurs, un
+    point de trop dans le nom du site est forcément une erreur."""
+    raw = str(url or "").strip()
+    parsed = urllib.parse.urlparse(raw if re.match(r"https?://", raw, re.I) else "https://" + raw)
+    host = (parsed.hostname or "").lower()
+    variants = []
+    for suffix in _PLATFORM_SUFFIXES:
+        if host.endswith("." + suffix):
+            name = host[: -len(suffix) - 1]
+            if "." in name:
+                netloc = name.replace(".", "-") + "." + suffix
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                variants.append(parsed._replace(netloc=netloc).geturl())
+    return variants
+
+
 def fetch_main_text(url: str) -> dict:
-    """{"url", "titre", "texte"} : contenu principal complet (sans troncature)."""
+    """{"url", "titre", "texte"} : contenu principal complet (sans troncature).
+    Si l'adresse ne répond pas, essaie ses variantes probables (url_variants) ;
+    "adresse_corrigee" indique alors l'adresse qui a marché."""
     cached = _cache_get(f"main:{url}")
     if cached:
         return cached
     from tools.page_text import extract_main_text
-    result = {"url": url, **extract_main_text(fetch_page_html(url))}
+    try:
+        result = {"url": url, **extract_main_text(fetch_page_html(url))}
+    except Exception as first_error:
+        for variant in url_variants(url):
+            try:
+                result = {"url": variant, "adresse_corrigee": variant,
+                          **extract_main_text(fetch_page_html(variant))}
+                break
+            except Exception:
+                continue
+        else:
+            raise first_error
     _cache_set(f"main:{url}", result)
     return result
 
@@ -119,8 +160,12 @@ def read_webpage(url: str) -> dict:
         total = len(text)
         if total > 6000:
             text = text[:6000] + "\n\n[... contenu tronqué ...]"
-        return {"success": True, "url": url, "titre": page["titre"],
-                "contenu": text, "longueur_totale": total}
+        result = {"success": True, "url": page.get("url", url), "titre": page["titre"],
+                  "contenu": text, "longueur_totale": total}
+        if page.get("adresse_corrigee"):
+            result["note"] = (f"L'adresse {url} ne répondait pas ; c'est "
+                              f"{page['adresse_corrigee']} qui a marché (erreur de dictée probable).")
+        return result
     except urllib.error.URLError as e:
         return {"error": f"Impossible d'accéder à l'URL : {e}"}
     except Exception as e:

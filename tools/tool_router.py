@@ -110,7 +110,10 @@ CATEGORIES = {
     "lecture": (
         ("read_aloud", "get_page_text", "read_webpage", "open_browser"),
         # Des phrases seulement : "lis" seul viserait aussi "lis mes emails"
-        "lecture|a voix haute|a haute voix|lis moi|lis la page|lis cette page|lis l article|"
+        # "lis moi" seul proposait read_aloud pour "lis-moi la météo" : une page
+        # web entière était lue au lieu de la météo (test réel du 18/10/2026)
+        "lecture|a voix haute|a haute voix|lis moi la page|lis moi cette page|lis moi l article|"
+        "lis moi cet article|lis moi le texte|lis la page|lis cette page|lis l article|"
         "lis cet article|lire la page|lire l article|arrete de lire|arrete la lecture|"
         "stop la lecture|stoppe la lecture",
     ),

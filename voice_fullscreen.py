@@ -16,11 +16,12 @@ _env = (Path(sys.executable).parent / ".env"
         if getattr(sys, "frozen", False)
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
-from tools.voice import speak
+from tools.voice import speak, stop_voice
 from tools import TOOL_FUNCTIONS
 from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools, forced_tool
-from tools.instant import instant_reply
+from tools.instant import instant_reply, stop_reading_reply
+from tools import journal
 from tools.conversation import log_error, clip_tool_result, trim_history, speech_text
 from tools.memory import save_message
 from tools.guard import set_confirm_handler, tk_confirm_handler
@@ -98,11 +99,11 @@ STOP_WORDS = {
 # musique" quittaient Amah au lieu d'agir (banc vocal du 18/10/2026).
 _QUIT_REQUEST = re.compile(
     # Le prénom tel que Google le transcrit : "à ma", "Emma", "Hama"
-    r"^(?:(?:ok|bon|bien|merci|alors)\s+)*(?:(?:amah|ama|hama|emma|a\s+ma)\s+)?"
+    r"^(?:(?:ok|bon|bien|merci|alors)\s+)*(?:(?:amah|ama|hama|ahma|emma|a\s+ma|a\s+moi)\s+)?"
     r"(?:ferme(?:\s+(?:toi|tout|l\s*interface|la\s+fenetre))?|quitte(?:\s+tout)?|quitter|"
     r"au\s*revoir|bye(?:\s+bye)?|goodbye|exit|close|stop|arrete(?:\s+(?:tout|toi))?|"
     r"a\s+bientot|bonne\s+nuit|c\s+est\s+tout\s+pour\s+(?:aujourd\s+hui|moi))"
-    r"(?:\s+(?:amah|ama|hama|emma|a\s+ma|merci|a\s+bientot))*$"
+    r"(?:\s+(?:amah|ama|hama|ahma|emma|a\s+ma|a\s+moi|merci|a\s+bientot))*$"
 )
 
 
@@ -211,60 +212,17 @@ def _hex_points(cx, cy, r, angle_offset=0):
 
 # ── TTS local instantané (pyttsx3, sans réseau) ──────────────────────────────
 
-class _TtsWorker:
-    """Synthèse vocale locale via pyttsx3 (SAPI5 Windows).
-    Thread dédié — aucun appel réseau, audio démarre en < 50ms."""
-
-    def __init__(self):
-        self._queue     = queue.Queue()
-        self._done      = threading.Event()
-        self._done.set()
-        self._engine    = None
-        self._available = False
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 165)
-            for v in engine.getProperty('voices'):
-                if any(k in v.id.lower() for k in ('fr', 'hortense', 'julie')):
-                    engine.setProperty('voice', v.id)
-                    break
-            self._engine    = engine
-            self._available = True
-        except Exception:
-            return
-        while True:
-            text = self._queue.get()
-            if text is None:
-                break
-            if not text.strip():
-                self._done.set()
-                continue
-            try:
-                self._engine.say(text)
-                self._engine.runAndWait()
-            except Exception:
-                pass
-            self._done.set()
+class _AmahVoice:
+    """La voix d'Amah dans l'interface vocale : Henri, comme partout
+    (tools/voice.py), voix Windows en repli sans Internet. Avant, cette
+    interface parlait avec la voix Windows Hortense et la lecture de pages
+    avec Henri : deux voix différentes pour la même Amah."""
 
     def say(self, text: str) -> dict:
-        """Parle le texte (bloquant). Repli sur edge-tts si pyttsx3 indisponible."""
-        if not self._available:
-            return speak(text)
-        self._done.clear()
-        self._queue.put(text)
-        self._done.wait(timeout=60)
-        return {"success": True}
+        return speak(text)
 
     def stop(self):
-        if self._engine:
-            try:
-                self._engine.stop()
-            except Exception:
-                pass
+        stop_voice()
 
 
 # ── Interface ─────────────────────────────────────────────────────────────────
@@ -300,7 +258,7 @@ class AmahVoiceUI:
         self._webcam_frame  = None                # derniere image PIL (thread camera)
         self._webcam_photo  = None                # PhotoImage Tk (cree dans le thread UI)
 
-        self._tts = _TtsWorker()   # TTS local instantané (pyttsx3, thread dédié)
+        self._tts = _AmahVoice()   # voix Henri (tools/voice.py)
         self._chat_lock = threading.Lock()  # serialise _chat() entre voix et texte tape
         self._text_entry_visible = False  # suivi thread-safe (winfo_ismapped n'est pas thread-safe)
 
@@ -308,6 +266,10 @@ class AmahVoiceUI:
         self._ram = 0.0   # % RAM
         self._recent_memories = []  # derniers contenus get_memories (panneau bas-droite)
 
+        journal.session("interface vocale")
+        # La voix d'Amah (edge-tts, ~3 s à charger) est préparée pendant que
+        # l'interface s'ouvre : la 1re réponse ne paie pas ce chargement
+        threading.Thread(target=lambda: __import__("edge_tts"), daemon=True).start()
         self._build()
         self._grid_img = self._make_grid(self._W, self._H)  # grille pré-rendue 1×
         self._animate()
@@ -644,6 +606,10 @@ class AmahVoiceUI:
             self._sr.pause_threshold          = 0.6
             self._sr.energy_threshold         = 200
             self._sr.dynamic_energy_threshold = False  # evite que le seuil monte trop haut sur bruit de fond
+        # Reconnaissance Google : 8 s maximum. Sans limite (valeur par défaut),
+        # une réponse réseau perdue bloquait l'écoute pour toujours : Amah
+        # devenait sourde (fil d'écoute figé dans urlopen, vu le 18/10/2026).
+            self._sr.operation_timeout        = 8
             self._mic = sr.Microphone()
             with self._mic as src:
                 self._sr.adjust_for_ambient_noise(src, duration=0.5)
@@ -695,22 +661,23 @@ class AmahVoiceUI:
             return None   # rien dit dans le délai imparti
         finally:
             self._listening_active.clear()
-        try:
-            return self._sr.recognize_google(audio, language="fr-FR")
-        except sr.UnknownValueError:
-            return None   # parole incomprise
-        except sr.RequestError:
-            # Coupure DNS/reseau passagere (getaddrinfo failed...) : on retente
-            # une fois avant de signaler une vraie panne a l'utilisateur.
+        # Coupure réseau passagère ou délai dépassé : une 2e tentative, puis on
+        # rend la main à la boucle d'écoute (qui ne doit jamais se figer)
+        for attempt in range(2):
             try:
                 return self._sr.recognize_google(audio, language="fr-FR")
             except sr.UnknownValueError:
-                return None
-            except sr.RequestError as e:
+                return None   # parole incomprise
+            except Exception as e:      # RequestError, TimeoutError...
+                if attempt == 0:
+                    continue
+                log_error("voix | reconnaissance vocale", e)
+                journal.note(f"reconnaissance vocale sans réponse ({type(e).__name__}) : phrase perdue")
                 self.root.after(0, self._set_state, "ERREUR", "",
                                 f"Reconnaissance vocale indisponible : {str(e)[:120]}")
                 time.sleep(2.0)
                 return None
+        return None
 
     def _start_loop(self):
         threading.Thread(target=self._loop, daemon=True).start()
@@ -734,14 +701,25 @@ class AmahVoiceUI:
                 time.sleep(0.2)
                 continue
 
-            # Lecture d'une page à voix haute (read_aloud) : le micro
-            # entendrait Amah et prendrait sa voix pour une demande
+            # Lecture d'une page à voix haute (read_aloud) : on écoute quand
+            # même, mais seul un ordre d'arrêt est pris en compte — le micro
+            # entend aussi la voix d'Amah, qui ne doit pas devenir une demande.
+            # Avant, l'écoute était coupée : impossible d'arrêter à la voix
+            # (test réel du 18/10/2026, "arrête Amah" entendu après la lecture).
             if _reading_aloud():
                 if not was_reading:
                     was_reading = True
                     self.root.after(0, self._set_state, "REPOND", "", "",
-                                    "LECTURE  ·  ÉCHAP POUR ARRÊTER")
-                time.sleep(0.3)
+                                    "LECTURE  ·  DIS « STOP » OU ÉCHAP")
+                heard = self._listen_once()
+                if heard:
+                    journal.start("voix, pendant la lecture", heard, spoken=True)
+                    stopped = stop_reading_reply(heard)
+                    if stopped:
+                        journal.end(stopped)
+                        self.root.after(0, self._set_state, "REPOND", f'« {heard} »', "Lecture arrêtée.")
+                    else:
+                        journal.end("(ignoré : seul un ordre d'arrêt est pris en compte pendant la lecture)")
                 continue
             if was_reading:
                 was_reading = False
@@ -757,8 +735,10 @@ class AmahVoiceUI:
         """Traite un message (venant de la voix ou du champ texte) : appel
         Groq + reponse parlee/affichee. Peut etre appele depuis _loop ou
         depuis un thread declenche par la saisie texte (Ctrl+T)."""
+        journal.start("voix", texte, spoken=True)
         # Fermeture vocale
         if _is_quit_request(texte):
+            journal.end("À bientôt. (fermeture de l'interface vocale)")
             self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
             self._tts.say("À bientôt.")
             time.sleep(0.3)
@@ -769,6 +749,7 @@ class AmahVoiceUI:
         self.root.after(0, self._set_state, "PENSE", f'« {texte} »', "")
         with self._chat_lock:
             reply, is_err = self._chat(texte)
+        journal.end(reply, error=is_err)
 
         if self._pending_live_action:
             # toggle_live_mode a ete demande : on parle la confirmation
@@ -832,6 +813,7 @@ class AmahVoiceUI:
             return instant, False
 
         tools = _select_tools(text)
+        journal.routing(tools, select_tools(text, TOOLS_DEFINITIONS)[1] if journal.enabled() else None)
         model = MODEL_FULL if tools else MODEL_FAST
         # Outil imposé au premier appel seulement : actualité -> web_search,
         # "lis cette page à voix haute" -> read_aloud (comme gui.py et agent.py)

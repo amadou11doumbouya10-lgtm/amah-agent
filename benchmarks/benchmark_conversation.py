@@ -95,5 +95,22 @@ check("calcul dicté (« combien font 12 x 15 »…) : réponse instantanée",
 check("pas de calcul pour « 30 », « 18/10/2026 », un numéro de téléphone",
       not any(_extract_calculation(normalize_text(t)) for t in ("30", "18/10/2026", "2026-10-18", "+224 611 76 85 52")))
 
+# 6. Voix réelle de l'utilisateur (test du 18/10/2026) : Google écrit "Amah"
+#    "à moi", "ahma", "am" ; "lis-moi la météo" n'est pas une lecture de page
+from config import TOOLS_DEFINITIONS
+from tools.instant import _STOP_READING
+from tools.tool_router import select_tools
+
+check("réveil : « am » en premier mot, « ahma » reconnus ; « am » en fin de phrase ignoré",
+      listener._is_wake("am") and listener._is_wake("ahma tu peux me dire")
+      and not listener._is_wake("je suis là am"))
+check("arrêt de lecture : « arrête à moi », « à moi stop », « stop Amah »",
+      all(_STOP_READING.match(t) for t in ("arrête à moi", "à moi stop", "stop Amah", "ama arrête")))
+check("arrêt de lecture : « stoppe alarme », « arrête le PC » ne sont pas des arrêts",
+      not any(_STOP_READING.match(t) for t in ("stoppe alarme", "arrête le PC")))
+check("« lis-moi la météo », « lis-moi mes emails » : pas de lecture de page web",
+      not any("read_aloud" in [x["function"]["name"] for x in select_tools(t, TOOLS_DEFINITIONS)[0]]
+              for t in ("lis-moi la météo de Paris", "lis-moi mes emails")))
+
 print(f"\n{sum(results)}/{len(results)} vérifications réussies")
 sys.exit(0 if all(results) else 1)

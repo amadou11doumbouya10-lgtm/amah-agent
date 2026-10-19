@@ -22,6 +22,7 @@ from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply
+from tools import journal
 # Journal d'erreurs, troncature des résultats, coupure de l'historique, texte
 # pour la voix : communs aux 3 interfaces (tools/conversation.py)
 from tools.conversation import (log_error as _log_error, clip_tool_result as _clip_result,
@@ -181,6 +182,7 @@ class AmahGUI:
         self.messages        = [{"role": "system", "content": SYSTEM_PROMPT}] + previous
         self._previous_count = len(previous)
 
+        journal.session("fenêtre")
         self._build_ui()
         self._bind_shortcuts()
         self._welcome()
@@ -772,6 +774,7 @@ class AmahGUI:
         last_user = next(
             (m["content"] for m in reversed(self.messages) if m["role"] == "user"), ""
         )
+        journal.start("fenêtre", last_user)
 
         # Heure, date, calcul simple : réponse locale immédiate, sans appel IA
         instant = instant_reply(last_user)
@@ -785,6 +788,8 @@ class AmahGUI:
         except Exception as e:
             _log_error(f"memoire | {last_user[:120]!r}", e)
             memory, direct = None, False
+        if memory:
+            journal.note("rappel de mémoire" + (" (réponse directe)" if direct else " (ajouté au contexte)"))
         if memory and direct:
             recalled = format_recall(memory)
             if recalled:
@@ -797,6 +802,7 @@ class AmahGUI:
             self.messages[0]["content"] = system_original + instruction
 
         tools  = self._select_tools(last_user)
+        journal.routing(tools, getattr(self, "_router_info", None))
         stream = self._is_simple_query(last_user, tools)
         try:
             if stream:
@@ -807,9 +813,11 @@ class AmahGUI:
                 finish = self._show_reply
             self.messages.append({"role": "assistant", "content": reply})
             save_message(self.session_id, "assistant", reply)
+            journal.end(reply)
             self.root.after(0, finish, reply)
         except Exception as e:
             _log_error(f"chat | {last_user[:120]!r}", e)
+            journal.end(str(e), error=True)
             self.root.after(0, self._show_error, self._format_error(str(e)))
         finally:
             # La mémoire ne sert qu'à ce tour : ne pas l'accumuler dans le prompt
@@ -818,6 +826,7 @@ class AmahGUI:
 
     def _finish_local_reply(self, reply: str):
         """Réponse produite sans appel IA (instantanée ou mémoire)."""
+        journal.end(reply)
         self.messages.append({"role": "assistant", "content": reply})
         save_message(self.session_id, "assistant", reply)
         self.root.after(0, self._show_reply, reply)

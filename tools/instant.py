@@ -70,9 +70,12 @@ def format_datetime(kind: Optional[str], data: dict) -> str:
     return f"Il est {time_value}." if time_value else f"Nous sommes le {date_value}."
 
 
+# Le prénom avant ou après, tel que Google transcrit "Amah" : "à moi", "ama"...
+# (test avec la vraie voix du 18/10/2026 : "arrête à moi", "à moi stop")
+_NAME = r"(?:amah|ama|hama|ahma|emma|a\s+ma|à\s+ma|a\s+moi|à\s+moi)"
 _STOP_READING = re.compile(
-    r"^(?:amah\s+)?(?:stop|stoppe|arrete|arrête|tais[- ]toi|silence|chut|ca suffit|ça suffit)\b"
-    r"(?:\s+(?:de\s+lire|la\s+lecture|de\s+parler|la|ca|ça|tout))?\s*[.!]*$",
+    r"^(?:" + _NAME + r"\s+)?(?:stop|stoppe|arrete|arrête|tais[- ]toi|silence|chut|ca suffit|ça suffit)\b"
+    r"(?:\s+(?:de\s+lire|la\s+lecture|de\s+parler|la|ca|ça|tout))?(?:\s+" + _NAME + r")?\s*[.!]*$",
     re.IGNORECASE,
 )
 
@@ -144,6 +147,14 @@ def briefing_reply(user_text: str) -> Optional[str]:
 def instant_reply(user_text: str) -> Optional[str]:
     """Réponse locale pour l'heure, la date, un calcul simple, la lecture
     d'une page à voix haute (lancement, arrêt), le point du jour, sinon None."""
+    reply = _instant_reply(user_text)
+    if reply:
+        from tools import journal
+        journal.note("réponse instantanée, sans appel IA")
+    return reply
+
+
+def _instant_reply(user_text: str) -> Optional[str]:
     from tools import TOOL_FUNCTIONS
 
     for local in (stop_reading_reply, read_aloud_reply, briefing_reply):

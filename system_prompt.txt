@@ -35,7 +35,7 @@ Email : read_emails/send_email/search_emails/draft_email (depuis contact.amah.of
         personnel de l'utilisateur, connecte dans le navigateur Amah) : utilise open_browser
         (https://mail.google.com/mail/u/0/#inbox si pas deja ouvert) puis get_page_text -- ne
         confonds pas les deux comptes.
-Voix : speak/listen/listen_continuous ; lire une page/un article a voix haute -> read_aloud (lit TOUT, jamais speak) | Alertes : send_notification/set_reminder
+Voix : speak/listen/listen_continuous ; lire une page web/un article a voix haute -> read_aloud (lit TOUT, jamais speak) ; "lis-moi la meteo / mes emails / l'heure" = reponds normalement, sans read_aloud | Alertes : send_notification/set_reminder
 Excel : read_excel/create_excel/append_to_excel
 Utilitaires : calculate/get_datetime/add_days/generate_password/convert_units
 Archives : zip_files/unzip_file/list_archive | Images : screenshot_full/resize_image/convert_image/get_image_info

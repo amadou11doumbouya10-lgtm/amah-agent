@@ -70,21 +70,22 @@ try:
         check(f"notification {i} : texte hors du script, transmis par variable",
               payload not in " ".join(args) and env.get("AMAH_NOTIF_TEXT") == payload)
 
-        # Repli vocal Windows (edge-tts simulé en panne)
+        # Repli vocal Windows (edge-tts simulé en panne) : la voix Windows est
+        # appelée directement (SAPI), plus par PowerShell — aucun shell lancé
         calls.clear()
-        saved = V._run_async_safely
+        saved, saved_sapi = V._run_async_safely, V._sapi_speak
+        said = []
 
         def _panne(factory):
             raise RuntimeError("edge-tts en panne (simulé)")
         V._run_async_safely = _panne
+        V._sapi_speak = lambda text, level=2: said.append(text)   # sans son
         try:
             V.speak(payload)
         finally:
-            V._run_async_safely = saved
-        args, env = calls[-1]
-        spoken = env.get("AMAH_TTS_TEXT", "")
-        check(f"voix (repli) {i} : texte hors du script, transmis par variable",
-              "New-Item" not in " ".join(args) and "New-Item" in spoken)
+            V._run_async_safely, V._sapi_speak = saved, saved_sapi
+        check(f"voix (repli) {i} : aucun shell lancé, texte remis tel quel à la voix Windows",
+              not calls and said and "New-Item" in said[0])
 
         # Presse-papiers
         calls.clear()

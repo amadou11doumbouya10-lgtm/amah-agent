@@ -55,6 +55,7 @@ live_debug.log
 *_debug.log
 voice_error.log
 amah_errors.log
+amah_journal.txt
 
 # LiteLLM dev proxy (usage personnel uniquement, jamais pour les clients)
 litellm_config.yaml
@@ -92,3 +93,9 @@ amah_ico_*.png
 amah_ico_*.jpeg
 logo_reference.jpeg
 check_ico.py
+
+# Benchmark de TES conversations reelles (phrases personnelles) : jamais publie
+benchmarks/mes_conversations.json
+
+# Modele Vosk du mot de reveil (66 Mo) : telecharge, jamais commite
+models/

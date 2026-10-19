@@ -133,11 +133,40 @@ def _ensure_browser():
 def open_browser(url: str) -> dict:
     try:
         page = _ensure_browser()
+    except Exception as e:
+        return {"error": str(e)}
+    try:
         page.goto(url, timeout=15000)
         page.wait_for_load_state("domcontentloaded")
         return {"success": True, "url": page.url, "titre": page.title()}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as first_error:
+        # Adresse dictée mal transcrite ("site.nu.vercel.app" pour "site-nu") :
+        # on essaie les variantes probables avant d'abandonner
+        # (nouvel onglet : la page d'erreur du navigateur interromprait sinon
+        # la navigation suivante)
+        global _page
+        from tools.search import url_variants
+        for variant in url_variants(url):
+            tab = None
+            try:
+                tab = page.context.new_page()
+                tab.goto(variant, timeout=15000)
+                tab.wait_for_load_state("domcontentloaded")
+                try:
+                    page.close()
+                except Exception:
+                    pass
+                _page = tab
+                return {"success": True, "url": tab.url, "titre": tab.title(),
+                        "note": f"L'adresse {url} ne répondait pas ; {variant} a marché "
+                                "(erreur de dictée probable)."}
+            except Exception:
+                if tab is not None:
+                    try:
+                        tab.close()
+                    except Exception:
+                        pass
+        return {"error": str(first_error)}
 
 
 @_on_browser_thread

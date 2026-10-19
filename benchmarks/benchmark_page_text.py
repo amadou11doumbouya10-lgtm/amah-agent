@@ -87,5 +87,13 @@ done.set()
 reader._thread.join()
 reader._thread = None
 
+# 7. Adresse dictée : Google écrit un tiret comme un point (test réel du 18/10/2026)
+from tools.search import url_variants
+check("adresse dictée « campusmarket.nu.vercel.app » -> essai de « campusmarket-nu.vercel.app »",
+      url_variants("https://campusmarket.nu.vercel.app") == ["https://campusmarket-nu.vercel.app"]
+      and url_variants("campusmarket.nu.vercel.app/guide-vendeur") == ["https://campusmarket-nu.vercel.app/guide-vendeur"])
+check("adresses normales : aucune variante inventée",
+      url_variants("https://campusmarket-nu.vercel.app") == [] and url_variants("https://fr.wikipedia.org/wiki/Conakry") == [])
+
 print(f"\n{sum(results)}/{len(results)} vérifications réussies")
 sys.exit(0 if all(results) else 1)

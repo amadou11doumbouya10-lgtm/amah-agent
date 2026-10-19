@@ -218,6 +218,17 @@ class GroqClient:
         return True
 
     def chat(self, messages, model, tools=None, tool_choice=None, on_status=None, **kwargs):
+        """Appel au modèle, noté dans le journal de session (tools/journal.py)."""
+        started = time.time()
+        response = self._chat(messages, model, tools=tools, tool_choice=tool_choice,
+                              on_status=on_status, **kwargs)
+        from tools import journal
+        if journal.enabled():
+            usage = getattr(response, "usage", None)
+            journal.ia(model, time.time() - started, getattr(usage, "total_tokens", None))
+        return response
+
+    def _chat(self, messages, model, tools=None, tool_choice=None, on_status=None, **kwargs):
         """Appel chat.completions.create avec rotation de cles + retry backoff (1/2/4s).
 
         on_status(text: str) : callback optionnel (ex: mise a jour de la barre d'etat
