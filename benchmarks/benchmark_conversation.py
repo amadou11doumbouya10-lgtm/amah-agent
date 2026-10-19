@@ -60,6 +60,15 @@ check("lien -> son texte seul", speech_text("Voir [la doc](https://docs.python.o
 check("tableau -> cellules séparées", speech_text("| Ville | Temp |\n|---|---|\n| Conakry | 27 °C |") == "Ville, Temp. Conakry, 27 °C.")
 check("calcul avec * conservé", speech_text("3 * 4 = 12") == "3 * 4 = 12.")
 
+# 3 bis. Ce qui est dit = ce qui est affiché : coupé à la fin d'une phrase
+from tools.conversation import spoken_excerpt
+long_reply = " ".join(f"Phrase {i} de la réponse, qui continue un peu." for i in range(15))
+excerpt, was_cut = spoken_excerpt(long_reply)
+check("réponse longue : coupée à la fin d'une phrase (jamais au milieu)",
+      was_cut and excerpt.endswith(".") and len(excerpt) <= 450)
+check("réponse courte : dite et affichée en entier, sans Markdown",
+      spoken_excerpt("Il est **21 h**.") == ("Il est 21 h.", False))
+
 # 4. Terminal : mêmes confirmations que le garde-fou central
 check("terminal : lire la mémoire, briefing, lecture, traduction sans autorisation",
       all(classify_tool(n, a) == "SAFE" for n, a in [
@@ -111,6 +120,116 @@ check("arrêt de lecture : « stoppe alarme », « arrête le PC » ne sont pas 
 check("« lis-moi la météo », « lis-moi mes emails » : pas de lecture de page web",
       not any("read_aloud" in [x["function"]["name"] for x in select_tools(t, TOOLS_DEFINITIONS)[0]]
               for t in ("lis-moi la météo de Paris", "lis-moi mes emails")))
+
+# 7. Mots déformés par la reconnaissance vocale (journal du 18-19/10/2026)
+from tools.conversation import fix_transcript, today_line
+fixes = {
+    "récupère tous mes projets sur jet top": "récupère tous mes projets sur GitHub",
+    "active le chaîne de test": "active le champ de texte",
+    "à moi tu peux me dire il fait quelle heure": "Amah, tu peux me dire il fait quelle heure",
+    "ama": "Amah",
+}
+check("transcriptions corrigées (jet top -> GitHub, chaîne de test -> champ de texte, à moi -> Amah)",
+      all(fix_transcript(k) == v for k, v in fixes.items()))
+check("phrases normales intactes (Emma Watson, un chat, YouTube)",
+      all(fix_transcript(t) == t for t in ("Emma Watson est une actrice", "j'ai un chat à la maison",
+                                            "tu peux ouvrir YouTube")))
+github_heard = {
+    "tu peux me lister tous mes projets sur YouTube": "tu peux me lister tous mes projets sur GitHub",
+    "récupère le code sur YouTube": "récupère le code sur GitHub",
+    "montre mes dépôts YouTube": "montre mes dépôts GitHub",
+}
+check("« YouTube » pour des projets ou du code -> GitHub (mal entendu par Google)",
+      all(fix_transcript(k) == v for k, v in github_heard.items()))
+check("vrai YouTube intact (ouvre YouTube, musique, vidéo de mon projet)",
+      all(fix_transcript(t) == t for t in ("ouvre YouTube", "mets de la musique sur YouTube",
+                                            "la vidéo de mon projet sur YouTube", "cherche des tutos sur YouTube")))
+check("date du jour fournie au modèle (année en cours)", str(__import__("datetime").date.today().year) in today_line())
+
+# 8. Mode Live avec Henri : le découpage en phrases ne perd jamais de texte
+import tools.voice as voice_module
+splitter = object.__new__(voice_module.SentenceSpeaker)
+splitter._buffer, splitter.MAX_PENDING, spoken_parts = "", 180, []
+splitter._say = spoken_parts.append
+reply = "Ton site est https://campusmarket-nu.vercel.app. Il fait 3.5 degrés. "
+for i in range(0, len(reply), 5):
+    splitter.feed(reply[i:i + 5])
+check("découpage du mode Live : adresse web gardée dans sa phrase, rien de perdu",
+      "".join(spoken_parts) + splitter._buffer == reply and "vercel.app." in spoken_parts[0])
+
+# 9. Fin des boucles d'outils : après MAX_TOOL_ROUNDS tours, une réponse sans outil
+from types import SimpleNamespace
+import tools.conversation as conversation_module
+from tools.conversation import MAX_TOOL_ROUNDS, WRAP_UP_FALLBACK, wrap_up
+conversation_module.log_error = lambda context, exc: None    # pas d'écriture dans amah_errors.log
+sent = []
+
+
+def fake_model(messages):
+    sent.append(messages)
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Voici ce que j'ai trouvé."))])
+
+
+def failing_model(messages):
+    raise RuntimeError("tool_use_failed")
+
+
+history = [{"role": "system", "content": "x"},
+           {"role": "user", "content": "météo"},
+           {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "get_weather", "arguments": "{}"}}]},
+           {"role": "tool", "content": "27 °C"}, {"role": "assistant", "content": "Il fait 27 °C."},
+           {"role": "user", "content": "liste mes projets"},
+           {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "web_search", "arguments": '{"query": "projets"}'}}]},
+           {"role": "tool", "content": "aucun résultat"}]
+check(f"boucle d'outils : {MAX_TOOL_ROUNDS} tours au plus, puis réponse du modèle sans outil",
+      2 <= MAX_TOOL_ROUNDS <= 6 and wrap_up(fake_model, history).choices[0].message.content == "Voici ce que j'ai trouvé."
+      and len(history) == 8)
+check("réponse finale : plus aucun message d'outil, résultats de la demande en cours en texte",
+      not any(m.get("role") == "tool" or m.get("tool_calls") for m in sent[0])
+      and "web_search" in sent[0][-1]["content"] and "aucun résultat" in sent[0][-1]["content"]
+      and "get_weather" not in sent[0][-1]["content"] and sent[0][-2]["content"] == "liste mes projets")
+check("boucle d'outils : si la dernière réponse échoue, message d'excuse (pas d'erreur)",
+      wrap_up(failing_model, history).choices[0].message.content == WRAP_UP_FALLBACK)
+
+# 10. Session vocale du 19/10/2026 (formulaire de CampusMarket)
+dictated = {
+    "il y a une chambre de contact tu peux mettre mon numéro": "il y a une champ de contact tu peux mettre mon numéro",
+    "il y a un chat mail aussi": "il y a un champ mail aussi",
+    "les projets que tu vois dans mon compte du top": "les projets que tu vois dans mon compte GitHub",
+}
+check("« chambre de contact », « chat mail », « compte du top » corrigés",
+      all(fix_transcript(k) == v for k, v in dictated.items()))
+check("« chambre d'hôtel », « mon chat », « c'est du top » intacts",
+      all(fix_transcript(t) == t for t in ("réserve une chambre de luxe", "mon chat dort", "c'est du top")))
+
+from tools.conversation import drop_old_tool_results, with_recent_tools
+
+
+def request(text, tool, result, reply):
+    return [{"role": "user", "content": text},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": text, "function": {"name": tool, "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": text, "content": result},
+            {"role": "assistant", "content": reply}]
+
+
+session = ([{"role": "system", "content": "x"}]
+           + request("ouvre campus market", "open_browser", "page " * 500, "C'est ouvert.")
+           + request("clique sur devenir vendeur", "click_text", "ok", "J'ai cliqué.")
+           + request("remplis le formulaire", "type_in_field", "ok", "C'est rempli.")
+           + [{"role": "user", "content": "il y a un champ de contact"}])
+light = drop_old_tool_results(session)
+check("historique allégé : résultats d'outils des demandes anciennes retirés, réponses gardées",
+      len(str(light)) < len(str(session)) / 3 and "C'est ouvert." in str(light)
+      and not any(m.get("tool_calls") and m["tool_calls"][0]["function"]["name"] in ("open_browser", "click_text")
+                  for m in light))
+check("historique allégé : demande précédente intacte, aucun résultat orphelin",
+      any(m.get("role") == "tool" and m.get("tool_call_id") == "remplis le formulaire" for m in light)
+      and all(m.get("role") != "tool" or light[i - 1].get("tool_calls") or light[i - 1].get("role") == "tool"
+              for i, m in enumerate(light)))
+routed = with_recent_tools([TOOLS_DEFINITIONS[0]], session, TOOLS_DEFINITIONS)
+check("suite d'une demande (« il y a un champ de contact ») : outils du navigateur gardés",
+      {"type_in_field", "click_text", "get_page_text"} <= {t["function"]["name"] for t in routed})
+check("conversation pure : toujours aucun outil", with_recent_tools([], session, TOOLS_DEFINITIONS) == [])
 
 print(f"\n{sum(results)}/{len(results)} vérifications réussies")
 sys.exit(0 if all(results) else 1)

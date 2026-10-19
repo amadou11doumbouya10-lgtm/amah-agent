@@ -231,11 +231,122 @@ def click_text(text: str) -> dict:
         return {"error": str(e)}
 
 
+# Champs de formulaire tels que l'utilisateur les voit : libellé (label for=,
+# label parent, aria-label, placeholder, nom). Le modèle ne voyait que le texte
+# de la page : il essayait "Email" là où le champ s'appelle "E-mail" (18 s
+# perdues par essai) et ne savait pas quels champs remplir (test du 19/10/2026).
+_FIELD_HELPERS = r"""
+const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+const labelEl = el => (el.id && document.querySelector('label[for="' + CSS.escape(el.id) + '"]')) || el.closest('label');
+const labelOf = el => {
+  const l = labelEl(el);
+  return ((l && l.innerText) || el.getAttribute('aria-label') || el.placeholder || el.title
+          || el.name || el.id || '').replace(/\s+/g, ' ').trim();
+};
+const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const fields = () => [...document.querySelectorAll('input, textarea, select')]
+  .map((el, i) => ({el, i}))
+  .filter(({el}) => !['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes(el.type)
+    && (visible(el) || ((el.type === 'checkbox' || el.type === 'radio') && labelEl(el) && visible(labelEl(el)))));
+"""
+
+_LIST_FIELDS_JS = "() => {" + _FIELD_HELPERS + r"""
+  const champs = fields().slice(0, 40).map(({el}) => {
+    const f = {champ: labelOf(el).slice(0, 80),
+               type: el.tagName === 'SELECT' ? 'liste' : el.tagName === 'TEXTAREA' ? 'texte long' : (el.type || 'text')};
+    if (el.tagName === 'SELECT') f.choix = [...el.options].map(o => o.text.trim()).filter(Boolean).slice(0, 25);
+    if (el.type === 'checkbox' || el.type === 'radio') f.coche = el.checked;
+    else if (el.value) f.rempli = true;
+    if (el.required) f.obligatoire = true;
+    return f;
+  });
+  const boutons = [...document.querySelectorAll('button, input[type=submit], input[type=button]')]
+    .filter(visible).map(b => (b.innerText || b.value || b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean).slice(0, 20);
+  return {champs, boutons};
+}"""
+
+# Meilleur champ pour un libellé donné, sans tenir compte des accents, tirets
+# et majuscules ("Email" -> "E-mail", "téléphone" -> "Numéro de téléphone")
+_FIND_FIELD_JS = "({q, bool}) => {" + _FIELD_HELPERS + r"""
+  const want = norm(q);
+  let best = null, bestScore = 0;
+  for (const {el, i} of fields()) {
+    // Une case à cocher ne reçoit que oui/non : "contact" + un numéro ne doit
+    // pas tomber sur la case id="contact_consent"
+    if (!bool && (el.type === 'checkbox' || el.type === 'radio')) continue;
+    const names = [labelOf(el), el.getAttribute('aria-label'), el.placeholder, el.name, el.id, el.title]
+      .map(norm).filter(n => n.length >= 3);
+    for (const n of names) {
+      // Mot contenu dans le libellé : seulement un libellé court ("contact"
+      // ne doit pas trouver la case "… ils vous contactent : cet accord …")
+      const partial = want.length >= 3 && (n.startsWith(want)
+        || (n.length <= Math.max(30, want.length * 4) && (n.includes(want) || want.includes(n))));
+      const s = n === want ? 3 : partial ? 2 : 0;
+      if (s > bestScore) { best = [i, labelOf(el), el.tagName === 'SELECT' ? 'select' : (el.type || 'text')]; bestScore = s; }
+    }
+  }
+  return best;
+}"""
+
+_PICK_OPTION_JS = r"""(el, q) => {
+  const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const w = norm(q);
+  const o = [...el.options].find(o => norm(o.text) === w)
+         || [...el.options].find(o => norm(o.text).length >= 2 && (norm(o.text).includes(w) || w.includes(norm(o.text))));
+  return o ? o.value : null;
+}"""
+
+_TRUE_WORDS = {"", "oui", "yes", "true", "1", "coche", "coché", "cocher", "vrai", "on"}
+_FALSE_WORDS = {"non", "no", "false", "0", "decoche", "décoché", "décocher", "faux", "off"}
+
+
+def _form_summary(page):
+    """{"champs": [...], "boutons": [...]} de la page, ou None sans formulaire."""
+    try:
+        data = page.evaluate(_LIST_FIELDS_JS)
+        return data if data.get("champs") else None
+    except Exception:
+        return None
+
+
+def _fill_found_field(page, index: int, kind: str, text: str):
+    locator = page.locator("input, textarea, select").nth(index)
+    if kind == "select":
+        value = locator.evaluate(_PICK_OPTION_JS, text)
+        if value is None:
+            choices = locator.evaluate("el => [...el.options].map(o => o.text.trim()).filter(Boolean)")
+            raise ValueError(f"Choix introuvable : '{text}'. Choix possibles : {', '.join(choices[:25])}")
+        locator.select_option(value=value, timeout=3000)
+    elif kind in ("checkbox", "radio"):
+        if str(text).strip().lower() in _TRUE_WORDS or kind == "radio":
+            locator.check(force=True, timeout=3000)
+        else:
+            locator.uncheck(force=True, timeout=3000)
+    else:
+        locator.fill(text, timeout=5000)
+
+
 @_on_browser_thread
 def type_in_field(label: str, text: str) -> dict:
     """Ecrit du texte dans un champ identifie par son label/placeholder/nom -- pas besoin de selecteur CSS."""
     try:
         page = _ensure_browser()
+        try:
+            is_bool = str(text).strip().lower() in _TRUE_WORDS | _FALSE_WORDS
+            found = page.evaluate(_FIND_FIELD_JS, {"q": label, "bool": is_bool})
+        except Exception:
+            found = None
+        if found:
+            index, field_label, kind = found
+            try:
+                _fill_found_field(page, index, kind, text)
+                shown = "(masqué)" if kind == "password" else text
+                return {"success": True, "champ": field_label, "valeur": shown}
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception:
+                pass                    # repli : localisateurs Playwright ci-dessous
         strategies = [
             lambda: page.get_by_label(label, exact=False),
             lambda: page.get_by_placeholder(label, exact=False),
@@ -251,12 +362,16 @@ def type_in_field(label: str, text: str) -> dict:
         for strat in strategies:
             try:
                 locator = strat().first
-                locator.wait_for(state="visible", timeout=3000)
-                locator.fill(text, timeout=5000)
+                locator.wait_for(state="visible", timeout=1000)
+                locator.fill(text, timeout=3000)
                 return {"success": True, "champ": label, "valeur": text}
             except Exception:
                 continue
-        return {"error": f"Aucun champ trouve pour : '{label}'"}
+        form = _form_summary(page)
+        error = {"error": f"Aucun champ trouve pour : '{label}'"}
+        if form:
+            error["champs_disponibles"] = [f["champ"] for f in form["champs"]]
+        return error
     except Exception as e:
         return {"error": str(e)}
 
@@ -280,8 +395,13 @@ def get_page_text() -> dict:
         text, total = data["texte"], len(data["texte"])
         if total > 8000:
             text = text[:8000] + "\n\n[... tronqué ...]"
-        return {"success": True, "url": data["url"], "titre": data["titre"],
-                "texte": text, "longueur_totale": total}
+        result = {"success": True, "url": data["url"], "titre": data["titre"]}
+        form = _form_summary(page)
+        if form:
+            # Avant le texte : le résultat est tronqué à 4 000 caractères
+            result["formulaire"] = form
+        result.update(texte=text, longueur_totale=total)
+        return result
     except Exception as e:
         return {"error": str(e)}
 

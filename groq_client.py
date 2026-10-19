@@ -218,7 +218,12 @@ class GroqClient:
         return True
 
     def chat(self, messages, model, tools=None, tool_choice=None, on_status=None, **kwargs):
-        """Appel au modèle, noté dans le journal de session (tools/journal.py)."""
+        """Appel au modèle, noté dans le journal de session (tools/journal.py).
+        La date du jour est ajoutée au message système (sans elle, le modèle
+        cherchait l'actualité de 2024)."""
+        if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+            from tools.conversation import today_line
+            messages = [{**messages[0], "content": f"{messages[0]['content']}\n{today_line()}"}] + list(messages[1:])
         started = time.time()
         response = self._chat(messages, model, tools=tools, tool_choice=tool_choice,
                               on_status=on_status, **kwargs)

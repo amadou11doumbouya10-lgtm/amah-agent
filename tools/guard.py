@@ -12,6 +12,7 @@ commande destructive s'executait directement.
 """
 import functools
 import inspect
+import re
 import threading
 from pathlib import Path
 
@@ -22,6 +23,15 @@ SENSITIVE_TOOLS = {
     "install_game_steam", "create_daily_task", "delete_task", "run_task_now",
     "delete_memory", "reset_stats", "start_auto_mute",
 }
+
+# Clic sur un site qui envoie, paie, publie ou supprime quelque chose : le
+# modèle a cliqué "Envoyer ma candidature" AVANT de remplir le formulaire, deux
+# fois (test réel du 19/10/2026 sur CampusMarket).
+_SUBMIT_CLICK = re.compile(
+    r"\b(?:envoy\w*|valid\w*|soumet\w*|soumission|confirm\w*|payer|paiement|pay|achet\w*|"
+    r"commander|publier|supprim\w*|effac\w*|s['’ ]?inscri\w*|postul\w*|r[ée]serv\w*|"
+    r"transf[ée]r\w*|virement|submit|send|buy|order|checkout|delete|remove|sign\s?up|register)\b",
+    re.I)
 
 # open_file sur ces extensions lance un programme au lieu d'ouvrir un document.
 _EXECUTABLE_EXT = {
@@ -51,6 +61,11 @@ def needs_confirmation(name: str, args: dict) -> bool:
         return _exists(args.get("path"))
     if name == "open_file":
         return Path(str(args.get("path") or "")).suffix.lower() in _EXECUTABLE_EXT
+    if name == "click_text":
+        return bool(_SUBMIT_CLICK.search(str(args.get("text") or "")))
+    if name == "click_element":
+        selector = str(args.get("selector") or "")
+        return "submit" in selector.lower() or bool(_SUBMIT_CLICK.search(selector))
     # execute_plan n'est pas filtre ici : chacune de ses etapes passe par
     # TOOL_FUNCTIONS et demande donc sa propre confirmation.
     return False
@@ -86,6 +101,8 @@ def describe(name: str, args: dict) -> str:
         "delete_memory": lambda: f"Supprimer le souvenir n°{a('memory_id')}",
         "reset_stats": lambda: "Effacer toutes les statistiques d'utilisation",
         "start_auto_mute": lambda: "Activer la webcam pour couper le son automatiquement",
+        "click_text": lambda: f"Cliquer sur « {a('text')} » (peut envoyer un formulaire, payer ou supprimer)",
+        "click_element": lambda: f"Cliquer sur {a('selector')} (peut envoyer un formulaire)",
     }
     builder = descriptions.get(name)
     return builder() if builder else f"Utiliser l'outil {name}"

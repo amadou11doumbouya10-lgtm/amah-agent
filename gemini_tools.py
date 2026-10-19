@@ -59,9 +59,15 @@ def get_function_declarations():
     return decls
 
 
-def get_tools():
-    """Retourne la liste tools=[...] prete pour LiveConnectConfig."""
-    return [types.Tool(function_declarations=get_function_declarations())]
+def get_tools(extra=None):
+    """Retourne la liste tools=[...] prete pour LiveConnectConfig. extra :
+    déclarations au format OpenAI d'outils propres à l'interface (champ de texte…)."""
+    decls = get_function_declarations()
+    for tool in extra or []:
+        fn = tool["function"]
+        decls.append(types.FunctionDeclaration(name=fn["name"], description=fn["description"],
+                                               parameters_json_schema=fn["parameters"]))
+    return [types.Tool(function_declarations=decls)]
 
 
 # ── Instruction systeme (condensee pour le mode audio temps reel) ───────────
@@ -84,4 +90,25 @@ Regles :
 - Email : relis le contenu a l'utilisateur et demande confirmation orale avant d'envoyer avec send_email.
 - Si une question porte sur un fait recent ou que tu n'es pas sure de connaitre, utilise web_search avant de repondre plutot que d'inventer.
 - Garde toujours des reponses courtes et naturelles, adaptees a l'oral.
+- Pour retrouver un projet, un site ou un compte de l'utilisateur, regarde d'abord son
+  PROFIL ci-dessous, puis get_memories, avant toute recherche web.
+- Si la voix est trop mal comprise, propose d'ouvrir le champ de texte (toggle_text_entry).
+
+Mots que la reconnaissance vocale deforme chez cet utilisateur :
+"jet top", "diptop", "git top", "lien dit op", et "YouTube" quand il parle de ses projets
+ou de code = GitHub ; "chaine de test", "chant de texte",
+"chat de test" = champ de texte ; "chambre de contact", "chat mail" = champ de contact,
+champ e-mail ; "compte du top" = compte GitHub ; "a moi", "ama", "Hama" en debut de phrase = Amah (ton nom).
 """.format(desktop=_DESKTOP, documents=_DOCUMENTS, downloads=_DOWNLOADS)
+
+
+def live_instruction() -> str:
+    """Instruction du mode Live au moment de la connexion : la base + la date
+    du jour + le profil de l'utilisateur. Avant, Gemini ne connaissait ni ses
+    projets, ni son GitHub, ni la date (test réel du 19/10/2026)."""
+    from config import PROFILE_TEXT
+    from tools.conversation import today_line
+    text = GEMINI_SYSTEM_INSTRUCTION + "\n" + today_line()
+    if PROFILE_TEXT:
+        text += "\n\nPROFIL UTILISATEUR :\n" + PROFILE_TEXT
+    return text

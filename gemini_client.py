@@ -21,6 +21,7 @@ Usage :
 import asyncio
 import functools
 import json
+import os
 import queue
 import threading
 import time
@@ -32,10 +33,18 @@ import sounddevice as sd
 from google import genai
 from google.genai import types
 
-from gemini_tools import get_tools, GEMINI_SYSTEM_INSTRUCTION
+from gemini_tools import get_tools, live_instruction
 from tools import TOOL_FUNCTIONS
 
 MODEL = "gemini-2.5-flash-native-audio-latest"
+
+# Voix du mode Live : "henri" (défaut) = la voix d'Amah partout ailleurs. Le
+# modèle Gemini ne produit que ses propres voix : son audio est ignoré et le
+# texte de sa réponse (output_transcription), découpé en phrases, est lu par
+# Henri (tools/voice.SentenceSpeaker) — ~1,5 à 2 s de plus avant la 1re phrase.
+# "gemini" : voix Gemini (Charon), réponse audio immédiate. Choix de
+# l'utilisateur le 19/10/2026 : une seule voix pour Amah, même en Live.
+LIVE_VOICE = os.getenv("AMAH_LIVE_VOICE", "henri").strip().lower()
 
 _LIVE_LOG = Path(__file__).parent / "live_debug.log"
 
@@ -56,12 +65,14 @@ class GeminiLiveSession:
     """Session Live audio temps reel, executee dans un thread dedie."""
 
     def __init__(self, api_key, on_status=None, on_user_text=None,
-                 on_reply_text=None, on_tool=None):
+                 on_reply_text=None, on_tool=None, local_tools=None):
         self.api_key       = api_key
         self.on_status     = on_status     or (lambda s: None)
         self.on_user_text  = on_user_text  or (lambda t: None)
         self.on_reply_text = on_reply_text or (lambda t: None)
         self.on_tool       = on_tool       or (lambda name, args, result: None)
+        # Outils de l'interface (ex. champ de texte) : {nom: (déclaration OpenAI, fonction(args))}
+        self.local_tools   = local_tools   or {}
 
         self._thread = None
         self._loop   = None
@@ -160,9 +171,9 @@ class GeminiLiveSession:
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             system_instruction=types.Content(
-                parts=[types.Part(text=GEMINI_SYSTEM_INSTRUCTION)]
+                parts=[types.Part(text=live_instruction())]
             ),
-            tools=get_tools(),
+            tools=get_tools(extra=[decl for decl, _fn in self.local_tools.values()]),
             speech_config=types.SpeechConfig(
                 language_code="fr-FR",
                 voice_config=types.VoiceConfig(
@@ -307,8 +318,23 @@ class GeminiLiveSession:
                 self.on_status(f"Erreur Live (audio) : {e}")
             _log("_player: arret")
 
-        player_thread = threading.Thread(target=_player, daemon=True)
-        player_thread.start()
+        henri = None
+        if LIVE_VOICE == "gemini":
+            player_thread = threading.Thread(target=_player, daemon=True)
+            player_thread.start()
+        else:
+            from tools.voice import SentenceSpeaker
+            shown = {"tag": None, "text": ""}
+
+            def _henri_says(sentence, tag):
+                # Affichage synchronisé avec la voix : on montre ce qu'Henri
+                # dit, phrase par phrase, pas la transcription qui le précède
+                if shown["tag"] != tag:
+                    shown.update(tag=tag, text="")
+                shown["text"] = (shown["text"] + " " + sentence).strip()
+                self.on_reply_text(shown["text"])
+
+            henri = SentenceSpeaker(speaking=self._speaking, on_start=_henri_says)
 
         user_chunks: list[str]  = []
         reply_chunks: list[str] = []
@@ -326,11 +352,16 @@ class GeminiLiveSession:
                             self.on_user_text("".join(user_chunks))
                         if sc.output_transcription and sc.output_transcription.text:
                             reply_chunks.append(sc.output_transcription.text)
-                            self.on_reply_text("".join(reply_chunks))
-                        if sc.model_turn:
+                            if henri is not None:
+                                henri.feed(sc.output_transcription.text)
+                            else:
+                                self.on_reply_text("".join(reply_chunks))
+                        if sc.model_turn and henri is None:
                             for part in sc.model_turn.parts:
                                 if part.inline_data and part.inline_data.data:
                                     play_q.put_nowait(part.inline_data.data)
+                        if sc.interrupted and henri is not None:
+                            henri.interrupt()
                         if sc.interrupted:
                             while not play_q.empty():
                                 try:
@@ -338,6 +369,9 @@ class GeminiLiveSession:
                                 except queue.Empty:
                                     break
                         if sc.turn_complete:
+                            if henri is not None:
+                                henri.flush()
+                                henri.tag += 1        # réponse suivante : nouvel affichage
                             user_chunks  = []
                             reply_chunks = []
                             self.on_status("ECOUTE")
@@ -355,10 +389,18 @@ class GeminiLiveSession:
                             )
         finally:
             stop_play.set()
+            if henri is not None:
+                henri.close()
 
     # ── Execution d'un outil Amah ────────────────────────────────────────────
 
     def _execute_tool(self, name, args):
+        if name in self.local_tools:
+            try:
+                result = self.local_tools[name][1](args)
+                return json.loads(result) if isinstance(result, str) else result
+            except Exception as e:
+                return {"error": str(e)}
         func = TOOL_FUNCTIONS.get(name)
         if not func:
             return {"error": f"Outil inconnu : {name}"}

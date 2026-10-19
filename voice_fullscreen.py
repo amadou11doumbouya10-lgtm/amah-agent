@@ -17,12 +17,14 @@ _env = (Path(sys.executable).parent / ".env"
         else Path(__file__).parent / ".env")
 load_dotenv(_env)
 from tools.voice import speak, stop_voice
-from tools import TOOL_FUNCTIONS
+from tools import TOOL_FUNCTIONS, resolve_tool_name
 from tools.updater import CURRENT_VERSION
 from tools.tool_router import select_tools, forced_tool
 from tools.instant import instant_reply, stop_reading_reply
 from tools import journal
-from tools.conversation import log_error, clip_tool_result, trim_history, speech_text
+from tools.conversation import (log_error, clip_tool_result, trim_history, speech_text,
+                                spoken_excerpt, fix_transcript, MAX_TOOL_ROUNDS, wrap_up,
+                                drop_old_tool_results, with_recent_tools)
 from tools.memory import save_message
 from tools.guard import set_confirm_handler, tk_confirm_handler
 from config import SYSTEM_PROMPT, TOOLS_DEFINITIONS, chat_messages
@@ -218,8 +220,8 @@ class _AmahVoice:
     interface parlait avec la voix Windows Hortense et la lecture de pages
     avec Henri : deux voix différentes pour la même Amah."""
 
-    def say(self, text: str) -> dict:
-        return speak(text)
+    def say(self, text: str, on_start=None) -> dict:
+        return speak(text, on_start=on_start)
 
     def stop(self):
         stop_voice()
@@ -735,7 +737,9 @@ class AmahVoiceUI:
         """Traite un message (venant de la voix ou du champ texte) : appel
         Groq + reponse parlee/affichee. Peut etre appele depuis _loop ou
         depuis un thread declenche par la saisie texte (Ctrl+T)."""
-        journal.start("voix", texte, spoken=True)
+        heard = texte
+        texte = fix_transcript(texte)          # "jet top" -> GitHub, "à moi" -> Amah…
+        journal.start("voix", texte if texte == heard else f"{heard}  (corrigé : {texte})", spoken=True)
         # Fermeture vocale
         if _is_quit_request(texte):
             journal.end("À bientôt. (fermeture de l'interface vocale)")
@@ -768,7 +772,7 @@ class AmahVoiceUI:
             # meme peripherique.
             self._live_mode = (action == "start")
             if reply and not is_err:
-                self._tts.say(speech_text(reply)[:450])
+                self._tts.say(spoken_excerpt(reply)[0])
             # Efface un eventuel message de statut Groq (rotation de cle)
             # laisse par _on_status pendant ce dernier echange.
             self.root.after(0, self._user_var.set, "")
@@ -779,18 +783,26 @@ class AmahVoiceUI:
                 self.root.after(0, self._stop_live)
             return
 
-        short = reply if len(reply) <= 220 else reply[:217] + "…"
+        # L'écran montre exactement ce qu'Henri dit (réponse nettoyée, coupée à
+        # la fin d'une phrase), et seulement quand sa voix démarre (~1,5 s de
+        # préparation) : avant, 220 caractères bruts tout de suite, puis 450
+        # lus plus tard et coupés au milieu d'une phrase (test du 19/10/2026).
+        spoken, _cut = spoken_excerpt(reply)
         if is_err:
-            self.root.after(0, self._set_state, "ERREUR", f'« {texte} »', short)
+            self.root.after(0, self._set_state, "ERREUR", f'« {texte} »', spoken)
             time.sleep(2.5)
         else:
-            self.root.after(0, self._set_state, "REPOND", f'« {texte} »', short)
+            show = lambda: self.root.after(0, self._set_state, "REPOND", f'« {texte} »', spoken)
             # speak() est bloquant : on attend la fin réelle de la voix
             # au lieu d'estimer une durée, et on affiche l'erreur si la
             # synthèse échoue plutôt que de l'avaler en silence.
             # Pendant une lecture à voix haute : réponse affichée seulement,
             # sinon les deux voix parlent en même temps.
-            voice_res = {} if _reading_aloud() else self._tts.say(speech_text(reply)[:450])
+            if _reading_aloud():
+                show()
+                voice_res = {}
+            else:
+                voice_res = self._tts.say(spoken, on_start=show)
             if "error" in voice_res:
                 self.root.after(0, self._set_state, "ERREUR", f'« {texte} »',
                                 f"Voix indisponible : {voice_res['error'][:120]}")
@@ -802,7 +814,7 @@ class AmahVoiceUI:
     def _chat(self, text: str):
         """Retourne (reply: str, is_error: bool)."""
         self.messages.append({"role": "user", "content": text})
-        self.messages = trim_history(self.messages, 20)
+        self.messages = trim_history(drop_old_tool_results(self.messages), 20)
         self._save("user", text)
 
         # Heure, date, calcul simple : réponse immédiate sans appel IA
@@ -812,7 +824,7 @@ class AmahVoiceUI:
             self._save("assistant", instant)
             return instant, False
 
-        tools = _select_tools(text)
+        tools = with_recent_tools(_select_tools(text), self.messages, TOOLS_DEFINITIONS)
         journal.routing(tools, select_tools(text, TOOLS_DEFINITIONS)[1] if journal.enabled() else None)
         model = MODEL_FULL if tools else MODEL_FAST
         # Outil imposé au premier appel seulement : actualité -> web_search,
@@ -842,16 +854,21 @@ class AmahVoiceUI:
                 return _call(msgs, tools)
             except Exception as e:
                 if "not in request.tools" in str(e) and tools is not TOOLS_DEFINITIONS:
-                    # Ajoute uniquement l'outil manquant au lieu des 99
+                    # Ajoute uniquement l'outil manquant au lieu des 101 (nom
+                    # corrigé : sans resolve_tool_name, rien n'était ajouté et
+                    # le 2e essai échouait pareil, journal du 19/10/2026)
                     repaired_name = repair_tool_use_failed(e)
-                    if repaired_name:
-                        missing_name = repaired_name[0]
-                        extra = [t for t in TOOLS_DEFINITIONS
-                                 if t["function"]["name"] == missing_name]
-                        tools = list(tools) + extra
-                    else:
+                    missing_name = resolve_tool_name(repaired_name[0]) if repaired_name else None
+                    extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == missing_name]
+                    tools = list(tools) + extra if extra else TOOLS_DEFINITIONS
+                    try:
+                        return _call(msgs, tools)
+                    except Exception as e2:
+                        # Encore un autre outil manquant : tous les outils
+                        if "not in request.tools" not in str(e2) or tools is TOOLS_DEFINITIONS:
+                            raise
                         tools = TOOLS_DEFINITIONS
-                    return _call(msgs, tools)
+                        return _call(msgs, tools)
 
                 # Autre cas de 400 AVANT reponse : le modele a emis un appel
                 # d'outil malforme en texte brut (tool_use_failed). On execute
@@ -878,6 +895,7 @@ class AmahVoiceUI:
         try:
             # Conversation pure (aucun outil) : prompt court, ~20x moins de tokens
             resp = _call_safe(self.messages if tools else chat_messages(self.messages))
+            rounds = 0
             while resp.choices[0].finish_reason == "tool_calls":
                 msg = resp.choices[0].message
                 self.messages.append({
@@ -897,6 +915,13 @@ class AmahVoiceUI:
                         "tool_call_id": tc.id,
                         "content": res,
                     })
+                rounds += 1
+                if rounds >= MAX_TOOL_ROUNDS:
+                    # Le modèle tourne en rond : dernière réponse, sans outil
+                    resp = wrap_up(lambda m: self.client.chat(messages=m, model=model, max_tokens=4096,
+                                                              temperature=0.4, on_status=_on_status),
+                                   self.messages)
+                    break
                 resp = _call_safe(self.messages)
 
             # Cas particulier : outil émis en texte brut <function>nom</function>{args}
@@ -1052,6 +1077,12 @@ class AmahVoiceUI:
             on_user_text=_user_text,
             on_reply_text=_reply_text,
             on_tool=_tool,
+            # Champ de texte et aperçu webcam aussi en mode Live (avant, Gemini
+            # répondait "je n'ai pas de champ de texte")
+            local_tools={
+                "toggle_text_entry": (_TEXT_ENTRY_TOOL, self._tool_toggle_text_entry),
+                "toggle_webcam_preview": (_WEBCAM_PREVIEW_TOOL, self._tool_toggle_webcam_preview),
+            },
         )
 
         def _launch():

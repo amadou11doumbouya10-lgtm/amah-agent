@@ -26,7 +26,8 @@ from tools import journal
 # Journal d'erreurs, troncature des résultats, coupure de l'historique, texte
 # pour la voix : communs aux 3 interfaces (tools/conversation.py)
 from tools.conversation import (log_error as _log_error, clip_tool_result as _clip_result,
-                                trim_history, speech_text)
+                                trim_history, speech_text, MAX_TOOL_ROUNDS as _MAX_TOOL_ROUNDS,
+                                wrap_up as _wrap_up, drop_old_tool_results, with_recent_tools)
 from tools.memory_context import memory_context, memory_instruction, SUMMARY_SYSTEM as MEMORY_SUMMARY_SYSTEM
 from tools.memory_recall_v024 import format_recall
 from tools.guard import set_confirm_handler, tk_confirm_handler
@@ -1211,12 +1212,12 @@ class AmahGUI:
         """Outils à proposer (routeur partagé tools/tool_router.py), ou None pour
         une conversation pure (salutation, remerciement)."""
         tools, self._router_info = select_tools(message, TOOLS_DEFINITIONS)
-        return tools or None
+        return with_recent_tools(tools, self.messages, TOOLS_DEFINITIONS) or None
 
     def _trim_messages(self):
         """Garde system prompt + MAX_MESSAGES derniers messages.
         Préserve les paires tool_call/tool_result pour éviter les erreurs API."""
-        self.messages = trim_history(self.messages, MAX_MESSAGES)
+        self.messages = trim_history(drop_old_tool_results(self.messages), MAX_MESSAGES)
 
     def _groq_call(self, messages, tools=None, model_override=None, tool_choice=None):
         """Appel Groq via le client partage (rotation de cles + retry backoff geres
@@ -1229,6 +1230,22 @@ class AmahGUI:
             max_tokens=4096, temperature=0.4,
             on_status=lambda txt: self.root.after(0, self._set_status, txt),
         )
+
+    def _retry_missing_tool(self, error, tools):
+        """Le modèle a appelé un outil hors de la sous-liste (erreur 400 de
+        Groq) : relance avec cet outil en plus ; s'il en demande encore un autre
+        au 2e essai, avec tous les outils (avant, l'erreur s'affichait telle
+        quelle, journal du 19/10/2026). Renvoie (réponse, outils)."""
+        repaired = repair_tool_use_failed(error)
+        name = resolve_tool_name(repaired[0]) if repaired else None
+        extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == name]
+        tools = list(tools or []) + extra if extra else TOOLS_DEFINITIONS
+        try:
+            return self._groq_call(self.messages, tools=tools, model_override=MODEL), tools
+        except Exception as e:
+            if "not in request.tools" not in str(e) or tools is TOOLS_DEFINITIONS:
+                raise
+            return self._groq_call(self.messages, tools=TOOLS_DEFINITIONS, model_override=MODEL), TOOLS_DEFINITIONS
 
     def _chat(self, last_user: str, tools) -> str:
         self._trim_messages()
@@ -1277,13 +1294,7 @@ class AmahGUI:
             # peut donc jamais s'en charger. On relance avec tous les outils
             # plutot que de remonter cette erreur a l'utilisateur.
             if "not in request.tools" in str(e):
-                _rep = repair_tool_use_failed(e)
-                if _rep:
-                    _extra = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] == resolve_tool_name(_rep[0])]
-                    tools = list(tools or []) + _extra
-                else:
-                    tools = TOOLS_DEFINITIONS
-                response = self._groq_call(self.messages, tools=tools, model_override=MODEL)
+                response, tools = self._retry_missing_tool(e, tools)
             else:
                 # Autre cas de 400 AVANT reponse : le modele a emis un appel
                 # d'outil malforme en texte brut (tool_use_failed). On tente
@@ -1303,6 +1314,7 @@ class AmahGUI:
                 tools    = list(tools or []) + _extra
                 response = self._groq_call(self.messages, tools=tools, model_override=MODEL)
 
+        rounds = 0
         while response.choices[0].finish_reason == "tool_calls":
             msg = response.choices[0].message
             if not msg.tool_calls:
@@ -1330,6 +1342,11 @@ class AmahGUI:
                 })
 
             self._trim_messages()
+            rounds += 1
+            if rounds >= _MAX_TOOL_ROUNDS:
+                # Le modèle tourne en rond : dernière réponse, sans outil
+                response = _wrap_up(lambda m: self._groq_call(m, model_override=MODEL), self.messages)
+                break
             # Reutilise la sous-liste d'outils ciblee (et non TOOLS_DEFINITIONS,
             # ~4200 tokens pour les 101 outils) pour eviter de depasser le TPM
             # Groq (12000) sur les enchainements multi-outils -- avec repli sur
@@ -1339,20 +1356,10 @@ class AmahGUI:
                                            model_override=MODEL)  # toujours 70B pour tool use
             except Exception as e:
                 if "not in request.tools" in str(e):
-                    # Ajoute uniquement l'outil manquant au lieu d'envoyer les 99.
-                    # (Pas d'import local ici : il rendait repair_tool_use_failed
-                    # "variable locale" dans tout _chat, et la réparation du
+                    # (Pas d'import local de repair_tool_use_failed dans _chat :
+                    # il la rendait "variable locale" et la réparation du
                     # premier appel plantait en UnboundLocalError.)
-                    repaired = repair_tool_use_failed(e)
-                    if repaired:
-                        missing_name = resolve_tool_name(repaired[0])
-                        extra = [t for t in TOOLS_DEFINITIONS
-                                 if t["function"]["name"] == missing_name]
-                        tools = list(tools or []) + extra
-                    else:
-                        tools = TOOLS_DEFINITIONS
-                    response = self._groq_call(self.messages, tools=tools,
-                                               model_override=MODEL)
+                    response, tools = self._retry_missing_tool(e, tools)
                 else:
                     raise
             if response.choices[0].finish_reason == "tool_calls":

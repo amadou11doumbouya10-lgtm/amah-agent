@@ -128,8 +128,23 @@ def main(folder: str):
         builtins.input = real_input
 
 
+def check_clicks():
+    """Sites web : un clic qui envoie, paie ou supprime demande l'accord
+    (le modèle a cliqué "Envoyer ma candidature" avant de remplir, 19/10/2026)."""
+    from tools.guard import needs_confirmation
+    sending = ["Envoyer ma candidature", "Valider la commande", "Payer", "Supprimer le produit",
+               "S'inscrire", "Confirmer"]
+    browsing = ["Devenir vendeur", "Connexion", "Mode et accessoires", "Choisir le pays", "Voir la boutique"]
+    check("clic Envoyer / Payer / Supprimer… : confirmation",
+          all(needs_confirmation("click_text", {"text": t}) for t in sending)
+          and needs_confirmation("click_element", {"selector": "button[type=submit]"}))
+    check("clic de navigation (Devenir vendeur, Connexion, pays…) : libre",
+          not any(needs_confirmation("click_text", {"text": t}) for t in browsing))
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="amah_guard_") as tmp:
         main(tmp)
+    check_clicks()
     print(f"\n{sum(results)}/{len(results)} vérifications réussies")
     sys.exit(0 if all(results) else 1)

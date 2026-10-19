@@ -34,6 +34,8 @@ if _PROFILE_PATH.exists():
     ]
     if _lines:
         SYSTEM_PROMPT += "\n\nPROFIL UTILISATEUR :\n" + "\n".join(_lines)
+# Le profil seul, aussi transmis au mode Live (gemini_tools.live_instruction)
+PROFILE_TEXT = "\n".join(_lines) if _PROFILE_PATH.exists() else ""
 
 # Prompt court pour la conversation pure (salutations, remerciements, "qui
 # es-tu", "que sais-tu faire") : SYSTEM_PROMPT, surtout des regles d'outils,

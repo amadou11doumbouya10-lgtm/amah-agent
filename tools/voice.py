@@ -72,7 +72,7 @@ def _run_async_safely(coro_factory):
     return result_future.result()
 
 
-def speak(text: str, speed: int = 2) -> dict:
+def speak(text: str, speed: int = 2, on_start=None) -> dict:
     """Fait parler Amah avec SA voix, Henri (edge-tts, fr-FR), partout : réponses
     de l'interface vocale, lecture de pages, fenêtre. Sans Internet : voix
     Windows en repli. Bloquant jusqu'à la fin de la phrase (ou stop_voice).
@@ -86,6 +86,15 @@ def speak(text: str, speed: int = 2) -> dict:
     safe = original.replace('"', ' ').replace("'", ' ').replace('\n', ' ').strip()
     if not safe:
         return {"error": "Texte vide à lire."}
+
+    def started():
+        # on_start : appelé quand le son démarre, pour afficher le texte au
+        # même moment (Henri met ~1,5 s à préparer sa voix)
+        if on_start:
+            try:
+                on_start()
+            except Exception:
+                pass
 
     try:
         level = int(speed)
@@ -101,6 +110,7 @@ def speak(text: str, speed: int = 2) -> dict:
             path, speech_end = _run_async_safely(lambda: _generate_tts_with_timeout(safe, rate))
             if _stopped.is_set():
                 return interrupted
+            started()
             _play_mp3(path, speech_end)
             if _stopped.is_set():
                 return {**interrupted, "voice": "Henri"}
@@ -118,6 +128,7 @@ def speak(text: str, speed: int = 2) -> dict:
     # Repli hors ligne : voix Windows, appelée directement (pas de PowerShell,
     # donc aucun texte inséré dans un script — voir benchmark_injection)
     try:
+        started()
         _sapi_speak(safe, level)
         if _stopped.is_set():
             return interrupted
@@ -184,3 +195,156 @@ def stop_voice() -> dict:
     """Coupe la voix en cours (Henri ou voix Windows)."""
     _stopped.set()
     return {"success": True}
+
+
+# ── Mode Live : Henri lit un texte qui arrive par morceaux ──────────────────
+import queue as _queue
+import re as _re
+import time as _time
+
+# Fin de phrase = ponctuation SUIVIE d'un espace. Avant, une phrase était
+# "tout sauf un point, puis un point" : le point de "campusmarket-nu.vercel.app"
+# coupait la phrase et tout le texte d'avant était perdu (test du 19/10/2026).
+_SENTENCE_END = _re.compile(r"[.!?…]+[»\")]*(?=\s)")
+
+
+class SentenceSpeaker:
+    """Fait dire par Henri un texte qui arrive par morceaux (transcription des
+    réponses de Gemini Live) : découpe en phrases, prépare la phrase suivante
+    pendant que la courante est jouée (pas de blanc de ~1,5 s entre les
+    phrases), et s'arrête net sur interrupt().
+
+    speaking (threading.Event, facultatif) est posé tant qu'Henri parle (et
+    0,35 s après) : le mode Live coupe alors le micro pour ne pas renvoyer la
+    voix d'Amah à Gemini comme si l'utilisateur parlait."""
+
+    HANGOVER = 0.35
+    MAX_PENDING = 180          # texte sans ponctuation : on coupe quand même
+
+    def __init__(self, speaking=None, rate: str = "+10%", on_start=None):
+        self.speaking = speaking
+        self.rate = rate
+        self.on_start = on_start          # on_start(phrase, tag) quand elle est dite
+        self.tag = 0                      # numéro de réponse (affichage par réponse)
+        self._buffer = ""
+        self._generation = 0
+        self._texts = _queue.Queue()
+        self._audio = _queue.Queue()
+        self._pending = 0              # phrases en préparation ou à jouer
+        self._lock = threading.Lock()
+        self._closed = False
+        threading.Thread(target=self._prepare_loop, name="henri-prepare", daemon=True).start()
+        threading.Thread(target=self._play_loop, name="henri-play", daemon=True).start()
+
+    # -- entrée ---------------------------------------------------------
+    def feed(self, chunk: str) -> None:
+        """Ajoute un morceau de texte ; les phrases complètes partent à Henri."""
+        self._buffer += str(chunk or "")
+        sentences = []
+        consumed = 0
+        for m in _SENTENCE_END.finditer(self._buffer):
+            sentences.append(self._buffer[consumed:m.end()])
+            consumed = m.end()
+        rest = self._buffer[consumed:]
+        if len(rest) > self.MAX_PENDING:
+            cut = max(rest.rfind(", ", 0, self.MAX_PENDING), rest.rfind(" ", 0, self.MAX_PENDING))
+            if cut > 40:
+                sentences.append(rest[:cut + 1])
+                rest = rest[cut + 1:]
+        self._buffer = rest
+        for s in sentences:
+            self._say(s)
+
+    def flush(self) -> None:
+        """Fin de la réponse : dit ce qui reste."""
+        rest, self._buffer = self._buffer, ""
+        self._say(rest)
+
+    def interrupt(self) -> None:
+        """Coupe tout : phrase en cours et phrases à venir."""
+        with self._lock:
+            self._generation += 1
+            self._buffer = ""
+            for q in (self._texts, self._audio):
+                while True:
+                    try:
+                        item = q.get_nowait()
+                    except _queue.Empty:
+                        break
+                    if q is self._audio and item and item[1]:      # (gen, chemin, …)
+                        try:
+                            os.unlink(item[1])
+                        except Exception:
+                            pass
+            self._pending = 0
+        _stopped.set()                  # arrête la lecture MCI en cours
+
+    def close(self) -> None:
+        self.interrupt()
+        self._closed = True
+        self._texts.put(None)
+        self._audio.put(None)
+
+    def busy(self) -> bool:
+        return self._pending > 0
+
+    # -- interne --------------------------------------------------------
+    def _say(self, text: str) -> None:
+        from tools.conversation import speech_text
+        text = speech_text(text).replace('"', " ").strip()
+        if not text:
+            return
+        with self._lock:
+            self._pending += 1
+            if self.speaking is not None:
+                self.speaking.set()
+            self._texts.put((self._generation, text, self.tag))
+
+    def _prepare_loop(self):
+        while True:
+            item = self._texts.get()
+            if item is None:
+                return
+            gen, text, tag = item
+            if gen != self._generation:
+                continue
+            try:
+                path, end = _run_async_safely(lambda: _generate_tts_with_timeout(text, self.rate))
+                self._audio.put((gen, path, end, None, text, tag))
+            except Exception:
+                self._audio.put((gen, None, None, text, text, tag))   # repli : voix Windows
+
+    def _play_loop(self):
+        while True:
+            item = self._audio.get()
+            if item is None:
+                return
+            gen, path, end, fallback_text, text, tag = item
+            try:
+                if gen == self._generation:
+                    _stopped.clear()
+                    if self.on_start:
+                        try:
+                            self.on_start(text, tag)
+                        except Exception:
+                            pass
+                    if path:
+                        _play_mp3(path, end)
+                    elif fallback_text:
+                        _sapi_speak(fallback_text)
+            except Exception:
+                pass
+            finally:
+                if path:
+                    try:
+                        os.unlink(path)
+                    except Exception:
+                        pass
+                with self._lock:
+                    if gen == self._generation and self._pending > 0:
+                        self._pending -= 1
+                    idle = self._pending == 0
+                if idle and self.speaking is not None:
+                    _time.sleep(self.HANGOVER)
+                    if self._pending == 0:
+                        self.speaking.clear()

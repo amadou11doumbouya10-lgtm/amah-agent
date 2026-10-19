@@ -130,13 +130,13 @@ amah-agent/
 ## Vérifications après chaque modification (sans appel IA)
 ```bash
 py -3.13 -m benchmarks.benchmark_tool_router   # routeur : 40/40 + 55/55 + 6/6 attendu
-py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 15/15 attendu
+py -3.13 -m benchmarks.benchmark_guard         # garde-fou : 17/17 attendu
 py -3.13 -m benchmarks.benchmark_license       # licences : 11/11 attendu
 py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique : 11/11
 py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
 py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code PowerShell : 13/13
 py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
-py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales : 21/21
+py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales : 42/42
 py -3.13 -m benchmarks.benchmark_interfaces --sans-ia   # 3 interfaces, demandes sans IA : 12/12
 # Tes vraies phrases (benchmarks/mes_conversations.json, LOCAL et gitignoré :
 # conversations personnelles, jamais publié) ; --extraire ajoute les nouvelles
@@ -266,6 +266,15 @@ Toutes les actions passent par UN fil dédié (`_on_browser_thread`) : Playwrigh
 synchrone refuse qu'un autre fil utilise sa page, et gui.py traite chaque message
 dans un nouveau fil — "ouvre X" marchait puis "lis la page" échouait ("cannot
 switch to a different thread"). get_page_text renvoie le contenu principal.
+Formulaires (test réel du 19/10/2026 sur CampusMarket) : get_page_text ajoute
+"formulaire" (AVANT le texte, qui est tronqué) : chaque champ avec son libellé
+exact, son type, ses choix (listes), rempli/coché, et les boutons. type_in_field
+trouve le champ sans tenir compte des accents/tirets/majuscules ("Email" →
+"E-mail (facultatif)", "téléphone" → "Numéro de téléphone"), remplit aussi les
+listes (choix approché) et les cases à cocher (oui/non seulement), masque les
+mots de passe dans son résultat, et renvoie les champs disponibles s'il ne
+trouve pas (0,1-0,3 s ; avant : 18 s par échec). Un clic d'envoi passe par le
+garde-fou (le modèle cliquait "Envoyer ma candidature" avant de remplir).
 
 ### Voix — tools/voice.py (1)
 speak(text, speed) — LA voix d'Amah, partout (réponses de l'interface vocale,
@@ -277,8 +286,14 @@ dans le processus). stop_voice() coupe l'une ou l'autre.
 Avant (18/10/2026) : l'interface vocale parlait avec la voix Windows Hortense
 via pyttsx3 — qui ne parle qu'UNE fois sous Windows (2e phrase muette, sans
 erreur) — et la lecture avec Henri : deux voix pour la même Amah.
-Mode Live (Gemini) : voix Gemini (Charon), Henri impossible sans perdre le
-temps réel ; échantillons de voix Gemini dans le dossier « Voix Amah » du Bureau.
+Mode Live (Gemini) : Henri aussi (AMAH_LIVE_VOICE=henri, défaut, choix de
+l'utilisateur le 19/10/2026). Le modèle natif ne produit que des voix Gemini :
+son audio est ignoré, le texte de sa réponse (output_transcription) est découpé
+en phrases et lu par Henri (tools/voice.SentenceSpeaker, phrase suivante
+préparée pendant la lecture). ~1,5-2 s de plus avant la 1re phrase ; testé en
+réel. AMAH_LIVE_VOICE=gemini : voix Charon. Le micro est coupé pendant qu'Amah
+parle (anti-écho), avec Henri comme avec Charon : pas d'interruption en cours
+de phrase.
 
 ### Lecture à voix haute — tools/reader.py (1)
 read_aloud(url, stop) — lit TOUT le contenu principal d'une page en arrière-plan,
@@ -599,7 +614,9 @@ Non testé : capture réelle du micro, ta voix et ton accent, mode Live Gemini.
   move_file, organize_folder, edit_file, edit_pdf, kill_process, wifi_toggle,
   send_email, install_game_steam, tâches planifiées, delete_memory,
   reset_stats, start_auto_mute ; write_file seulement s'il écrase un fichier
-  existant ; open_file seulement sur un exécutable (.exe, .bat, .ps1, .py…).
+  existant ; open_file seulement sur un exécutable (.exe, .bat, .ps1, .py…) ;
+  click_text / click_element seulement sur un bouton qui envoie, paie, publie
+  ou supprime (Envoyer, Valider, Payer, Supprimer, S'inscrire, [type=submit]…).
   Chaque interface enregistre son gestionnaire (set_confirm_handler) :
   fenêtre Oui/Non (tk_confirm_handler) dans gui.py et voice_fullscreen.py,
   question dans agent.py. **Sans gestionnaire enregistré, l'action est refusée.**
@@ -830,15 +847,41 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   visible sur l'écran de 720 px ; aucun .env/base/profil dans le zip
 
 ## À corriger (test vocal réel du 18/10/2026, vu dans amah_journal.txt)
-- [ ] Date du jour absente du prompt : le modèle cherchait l'actualité "2024"
-- [ ] Historique de l'interface vocale trop lourd : les résultats d'outils
-  (page lue…) restent et sont renvoyés à chaque demande (4 500 → 7 600 tokens)
+- [x] Date du jour ajoutée à chaque appel (GroqClient.chat, today_line) et au mode
+  Live : le modèle cherchait l'actualité "2024" ; testé (« 19 octobre 2026 »)
+- [x] Historique trop lourd (fenêtre et voix) : drop_old_tool_results
+  (tools/conversation.py) retire appels et résultats d'outils des demandes
+  anciennes, seules la demande en cours et la précédente les gardent ; les
+  réponses restent. Le 19/10, ~7 000 tokens par appel et les 3 clés épuisées
+  3 fois en 20 min (429), puis le quota journalier. À mesurer au prochain test
+- [x] Suites de demandes ("il y a un champ contact, mets mon numéro") :
+  with_recent_tools ajoute les outils de la demande précédente (les 4 du
+  navigateur si l'un a servi) — le routeur proposait des outils de fichiers
+- [x] Erreur 400 "not in request.tools" affichée (19/10, 2 fois) : au 2e essai
+  le modèle demandait un AUTRE outil absent ; maintenant 2e échec → tous les
+  outils (gui.py _retry_missing_tool, voice_fullscreen _call_safe, nom corrigé
+  par resolve_tool_name)
+- [x] Transcriptions : "chambre de contact" → champ de contact, "chat mail" →
+  champ mail, "compte du top" → compte GitHub
 - [ ] Bavardage non reconnu ("salut Hama", "ama", "ouais ça va et toi") :
   ~4 500 tokens au lieu de ~400 ; "à moi" seul → le 20b répète l'heure d'avant
 - [ ] "Quelle heure en Amérique" → réponse instantanée avec l'heure locale
 - [ ] analyze_screen avec question vide → la vision répond en chinois
-- [ ] Transcriptions Google à corriger : "chant de texte" / "chat de test" pour
-  "champ de texte", "à moi" pour "Amah"
+- [x] Transcriptions corrigées (tools/conversation.fix_transcript, interface vocale) :
+  "jet top"/"diptop" → GitHub, "chaîne/chat de test" → champ de texte, "à moi"/"ama"
+  en tête → Amah ("ama" seul devient du bavardage : 0 outil au lieu de 4 400 tokens) ;
+  "YouTube" → GitHub quand la phrase parle de projets/dépôts/code (Google entend
+  "YouTube" quand l'utilisateur dit "GitHub") — jamais avec vidéo/musique/chaîne
+- [x] Boucle d'outils sans fin (19/10, "mes projets sur YouTube" : 12 tours de
+  recherches, ~72 000 tokens, aucune réponse) : MAX_TOOL_ROUNDS = 5 dans gui.py et
+  voice_fullscreen.py, puis wrap_up (tools/conversation.py) répond sans outil avec
+  les résultats en texte (sinon gpt-oss rappelle un outil : 400 tool_use_failed) ;
+  REGLE PROFIL : questions sur l'utilisateur → son profil d'abord, sans outil
+- [x] Mode Live : profil utilisateur (GitHub, projets, site), date et mots déformés
+  dans l'instruction de Gemini (live_instruction) ; champ de texte et aperçu webcam
+  utilisables par Gemini (local_tools) ; écran synchronisé avec la voix d'Henri
+- [ ] Coupures "keepalive ping timeout" du mode Live (reconnexion automatique) :
+  à surveiller, réseau instable le 19/10
 - [ ] Les 28 échecs de benchmark_mes_conversations (adresses web, projets →
   mémoire, "recommande" → run_command, analyse d'écran → documents…)
 
