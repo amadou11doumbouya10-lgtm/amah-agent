@@ -34,7 +34,7 @@ GEMINI_TOOL_NAMES = {
     # Documents
     "create_pdf", "create_word",
     # Musique / video
-    "play_music", "open_youtube",
+    "play_music", "control_music", "open_youtube",
     # Rappels / notifications
     "set_reminder", "send_notification",
     # Vision

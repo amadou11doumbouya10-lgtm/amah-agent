@@ -92,6 +92,55 @@ def stop_reading_reply(user_text: str) -> Optional[str]:
     return "Lecture arrêtée."
 
 
+# Musique en cours (tools/youtube_tool.control_music) : "pause", "stop la
+# musique", "suivante", "reprends la musique" sans appel IA. Un "stop" seul ne
+# vise la musique que si un son sort vraiment (26/10/2026 : "stoppe à moi"
+# pendant une chanson, le modèle proposait de fermer Chrome).
+_NAME_NORM = r"(?:amah|ama|hama|ahma|emma|a ma|a moi)"
+_POLITE = re.compile(r"^(?:" + _NAME_NORM + r" )+|(?: (?:" + _NAME_NORM + r"|s il te plait|stp|merci))+$")
+# Pas "son" : "coupe le son" veut dire sourdine (mute_audio), pas pause
+_TRACK = r"(?:musique|chanson|video|morceau|titre)"
+_MUSIC_COMMANDS = [
+    ("pause", True, re.compile(
+        r"^(?:(?:stop|stoppe|arrete|coupe|pause)(?: (?:la|le|ta|cette) " + _TRACK + r")?"
+        r"|mets? (?:(?:la|le|ta|cette) " + _TRACK + r" )?en pause|(?:mets? )?(?:en )?pause)$")),
+    ("play", True, re.compile(r"^(?:reprends?|relance|remets?)(?: (?:la|le|ta) " + _TRACK + r")?$")),
+    ("next", True, re.compile(r"^(?:(?:la |le )?" + _TRACK + r" (?:suivante?|d apres)|suivante?|"
+                              r"passe (?:a )?(?:la |le )?(?:suivante?|" + _TRACK + r" suivante?))$")),
+    ("previous", True, re.compile(r"^(?:(?:la |le )?" + _TRACK + r" precedente?|precedente?|"
+                                  r"reviens (?:a )?(?:la |le )?precedente?)$")),
+]
+_BARE_STOP = re.compile(r"^(?:stop|stoppe|arrete|coupe)$")
+
+
+def music_command(user_text: str):
+    """(action, explicite) pour une commande de musique, sinon None.
+    explicite = False pour un "stop" seul : il ne vise la musique que si un
+    son sort des haut-parleurs."""
+    from tools.tool_router import normalize
+    text = _POLITE.sub("", normalize(user_text)).strip()
+    if _BARE_STOP.match(text):
+        return ("pause", False)
+    for action, explicit, pattern in _MUSIC_COMMANDS:
+        if pattern.match(text):
+            return (action, explicit)
+    return None
+
+
+def music_reply(user_text: str) -> Optional[str]:
+    command = music_command(user_text)
+    if not command:
+        return None
+    action, explicit = command
+    if not explicit:
+        from tools.youtube_tool import audio_playing
+        if not audio_playing():
+            return None
+    from tools import TOOL_FUNCTIONS
+    res = TOOL_FUNCTIONS["control_music"](action=action)
+    return res.get("message") if isinstance(res, dict) and res.get("success") else None
+
+
 # "Lis à voix haute" + une page : lancée sans appel IA (gpt-oss préférait
 # ouvrir le navigateur, et ignorait même tool_choice=read_aloud)
 _ALOUD = re.compile(r"\b(?:a voix haute|a haute voix)\b")
@@ -157,7 +206,7 @@ def instant_reply(user_text: str) -> Optional[str]:
 def _instant_reply(user_text: str) -> Optional[str]:
     from tools import TOOL_FUNCTIONS
 
-    for local in (stop_reading_reply, read_aloud_reply, briefing_reply):
+    for local in (stop_reading_reply, music_reply, read_aloud_reply, briefing_reply):
         reply = local(user_text)
         if reply:
             return reply

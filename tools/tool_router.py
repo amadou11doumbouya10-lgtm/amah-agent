@@ -152,9 +152,10 @@ CATEGORIES = {
     ),
     "webcam": (("analyze_webcam", "start_auto_mute", "stop_auto_mute"), "webcam camera cam"),
     "musique": (
-        ("play_music", "open_youtube", "search_youtube", "web_search"),
+        ("play_music", "control_music", "open_youtube", "search_youtube", "web_search"),
         "youtube yt video videos clip clips musique music chanson chansons joue jouer ecouter "
-        "mets film serie album artiste playlist",
+        "mets film serie album artiste playlist pause suivante suivant precedente precedent "
+        "reprends reprendre morceau",
     ),
     "vols": (
         ("search_flights", "web_search", "open_browser"),

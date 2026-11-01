@@ -55,7 +55,7 @@ Execution de plan : execute_plan(goal) — genere ET execute le plan automatique
 echoue). Si une etape est sensible (run_command/kill_process/delete_file/wifi_toggle/start_auto_mute/
 send_email), s'arrete et renvoie confirmation_requise + plan_id : demande confirmation a l'utilisateur,
 puis si OK rappelle execute_plan(plan_id=..., confirmed=true) pour continuer.
-Musique : play_music(query) — YouTube Music | Code : write_code/run_code/explain_code
+Musique : play_music(query) joue sur YouTube ; control_music(action) pause/reprise/suivante | Code : write_code/run_code/explain_code
 Jeux : open_steam/open_epic_games/list_installed_steam_games — lance launchers/liste jeux installes
        launch_game_steam(game_name)/search_game_on_steam(game_name)/install_game_steam(game_name)
 Webcam : analyze_webcam(question) — capture webcam + analyse visuelle par IA

@@ -2,7 +2,7 @@
 
 ## Présentation
 Agent IA local sur PC Windows. Cerveau : Groq (gpt-oss-120b / gpt-oss-20b,
-gratuit) + mode vocal temps réel Gemini Live. 101 outils réels.
+gratuit) + mode vocal temps réel Gemini Live. 102 outils réels.
 Projet séparé du chatbot web (avatar Amah). Usage : privé + commercial.
 Email officiel Amah : contact.amah.officiel@gmail.com
 Version actuelle : **v1.5.2** (source unique : `CURRENT_VERSION` dans tools/updater.py)
@@ -17,7 +17,7 @@ amah-agent/
 ├── groq_client.py            ← Client Groq centralisé (singleton, rotation 3 clés sans
 │                                 attente sur 429, repli dev sur proxy LiteLLM via
 │                                 LITELLM_URL avec sonde de port, réparation gpt-oss)
-├── gemini_tools.py           ← Sous-ensemble 33 outils + adaptateur schema pour Gemini Live
+├── gemini_tools.py           ← Sous-ensemble 34 outils + adaptateur schema pour Gemini Live
 ├── gemini_client.py          ← Session Gemini Live (audio temps réel + function calling)
 ├── config.py                 ← Modèles (MODEL, FINAL_MODEL), prompts, 99 définitions outils
 ├── system_prompt.txt         ← Texte du prompt système (~3 700 tokens avec le profil)
@@ -39,7 +39,7 @@ amah-agent/
 ├── amah_logo_hex.png         ← Logo hexagone PNG 680x680
 ├── version.json              ← Version actuelle pour les mises à jour auto
 ├── tools/
-│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (101 outils) : registre qui
+│   ├── __init__.py           ← SOURCE UNIQUE de TOOL_FUNCTIONS (102 outils) : registre qui
 │   │                            corrige les noms gpt-oss, garde-fou + statistiques
 │   │   ── Pipeline partagé (gui.py, voice_fullscreen.py, agent.py) ──
 │   ├── tool_router.py        ← Routeur d'outils unique (4 niveaux, 0 à 12 outils)
@@ -92,7 +92,7 @@ amah-agent/
 │   ├── license.py            ← Système de licence offline (1 outil)
 │   ├── computer_settings.py  ← Contrôle matériel : volume/luminosité/wifi (6 outils)
 │   ├── screen_vision.py      ← Analyse écran par IA vision (1 outil)
-│   ├── youtube_tool.py       ← YouTube + musique (3 outils)
+│   ├── youtube_tool.py       ← YouTube + musique (4 outils)
 │   ├── code_tools.py         ← Écriture/exécution/explication de code (3 outils)
 │   ├── flight_finder.py      ← Recherche de vols (1 outil)
 │   ├── planner.py            ← Plans IA multi-étapes + exécution auto (2 outils)
@@ -136,7 +136,7 @@ py -3.13 -m benchmarks.benchmark_history       # conservation/reprise historique
 py -3.13 -m benchmarks.benchmark_page_text     # contenu des pages + lecture : 14/14
 py -3.13 -m benchmarks.benchmark_injection     # texte externe hors du code PowerShell : 13/13
 py -3.13 -m benchmarks.benchmark_initiatives   # emails importants, alertes, briefing : 18/18
-py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales : 42/42
+py -3.13 -m benchmarks.benchmark_conversation  # briques communes, sécurité terminal, transcriptions vocales, musique : 46/46
 py -3.13 -m benchmarks.benchmark_interfaces --sans-ia   # 3 interfaces, demandes sans IA : 12/12
 # Tes vraies phrases (benchmarks/mes_conversations.json, LOCAL et gitignoré :
 # conversations personnelles, jamais publié) ; --extraire ajoute les nouvelles
@@ -227,7 +227,7 @@ Llama 3.3 70B, Llama 3.1 8B et llama-4-scout ont été retirés par Groq (404).
    - Tester sur des phrases DIFFÉRENTES des mots-clés : les anciens benchmarks
      reprenaient les phrases des motifs et mesuraient la mémorisation
 
-## Les 101 outils
+## Les 102 outils
 ### Fichiers — tools/files.py (12)
 list_files, organize_folder, find_files, move_file, create_folder, read_file,
 write_file, edit_file, edit_pdf, get_folder_info, delete_file, summarize
@@ -393,8 +393,22 @@ set_volume, get_audio_level, mute_audio, set_brightness, get_brightness, wifi_to
 ### Vision écran — tools/screen_vision.py (1)
 analyze_screen (Groq vision : qwen/qwen3.8-27b)
 
-### YouTube et musique — tools/youtube_tool.py (3)
-open_youtube, search_youtube, play_music
+### YouTube et musique — tools/youtube_tool.py (4)
+open_youtube, search_youtube, play_music, control_music(action)
+- play_music joue la vidéo YouTube qui correspond (page de résultats lue sans
+  navigateur, ~3-5 s ; première vidéo dont le titre contient les mots demandés,
+  sinon la première) dans le navigateur PAR DÉFAUT : la musique continue quand
+  Amah se ferme. Avant (26/10/2026) : une recherche YouTube Music, « pas
+  disponible dans votre pays », et rien ne se lançait
+- control_music : pause / play / next / previous par les touches multimédia de
+  Windows (tout lecteur : navigateur, Spotify, VLC). Pause et reprise sont la
+  même touche : audio_playing() lit d'abord la crête des haut-parleurs (Core
+  Audio via comtypes, ~0,1-0,8 s) pour ne pas relancer ce qu'on veut arrêter
+- Sans IA (tools/instant.py, music_reply) : « pause », « stop la musique »,
+  « suivante », « reprends la musique », « chanson précédente » ; un « stop » /
+  « stoppe à moi » seul ne vise la musique que si un son sort. Dans l'interface
+  vocale, « stop » pendant une musique la met en pause au lieu de fermer Amah
+  (_stop_means_music). « Coupe le son » reste une sourdine (mute_audio)
 
 ### Code — tools/code_tools.py (3)
 write_code, run_code, explain_code
@@ -569,7 +583,7 @@ Non testé : capture réelle du micro, ta voix et ton accent, mode Live Gemini.
   response_modalities=AUDIO, fr-FR)
 - gemini_client.py : pont microphone (16kHz) <-> haut-parleurs (24kHz) via
   sounddevice + asyncio, exécution d'outils via run_in_executor
-- gemini_tools.py : sous-ensemble de 33 outils "vocal-friendly" + adaptateur
+- gemini_tools.py : sous-ensemble de 34 outils "vocal-friendly" + adaptateur
   parameters_json_schema
 - Interruption naturelle (l'utilisateur peut couper la parole d'Amah)
 - Nécessite GEMINI_API_KEY dans .env (gratuite sur Google AI Studio)
@@ -863,6 +877,9 @@ Audit du 14/10/2026 : https://claude.ai/artifact/4buALzsuDviWsESJN29AwZ
   par resolve_tool_name)
 - [x] Transcriptions : "chambre de contact" → champ de contact, "chat mail" →
   champ mail, "compte du top" → compte GitHub
+- [x] Musique (test du 26/10) : play_music jouait YouTube Music, indisponible dans
+  le pays de l'utilisateur → vraie vidéo YouTube ; control_music + « pause »,
+  « suivante » sans IA ; « Saint-Auban Cagnes » → Santo Donkangni (transcription)
 - [ ] Bavardage non reconnu ("salut Hama", "ama", "ouais ça va et toi") :
   ~4 500 tokens au lieu de ~400 ; "à moi" seul → le 20b répète l'heure d'avant
 - [ ] "Quelle heure en Amérique" → réponse instantanée avec l'heure locale

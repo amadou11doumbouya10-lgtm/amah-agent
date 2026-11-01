@@ -113,6 +113,15 @@ def _is_quit_request(text: str) -> bool:
     from tools.tool_router import normalize
     return bool(_QUIT_REQUEST.match(normalize(text)))
 
+
+def _stop_means_music(text: str) -> bool:
+    """"Stop", "arrête"… pendant qu'une musique joue vise la musique."""
+    from tools.instant import music_command
+    if not music_command(text):
+        return False
+    from tools.youtube_tool import audio_playing
+    return bool(audio_playing())
+
 MODEL_FAST  = "openai/gpt-oss-20b"       # questions simples sans outils (~300ms)
 MODEL_FULL  = "openai/gpt-oss-120b"      # requêtes avec outils (~1-2s)
 
@@ -740,8 +749,9 @@ class AmahVoiceUI:
         heard = texte
         texte = fix_transcript(texte)          # "jet top" -> GitHub, "à moi" -> Amah…
         journal.start("voix", texte if texte == heard else f"{heard}  (corrigé : {texte})", spoken=True)
-        # Fermeture vocale
-        if _is_quit_request(texte):
+        # Fermeture vocale — sauf "stop" pendant une musique : il la met en
+        # pause (réponse instantanée plus bas) au lieu de fermer Amah
+        if _is_quit_request(texte) and not _stop_means_music(texte):
             journal.end("À bientôt. (fermeture de l'interface vocale)")
             self.root.after(0, self._set_state, "IDLE", texte, "À bientôt.")
             self._tts.say("À bientôt.")

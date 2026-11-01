@@ -231,5 +231,26 @@ check("suite d'une demande (« il y a un champ de contact ») : outils du naviga
       {"type_in_field", "click_text", "get_page_text"} <= {t["function"]["name"] for t in routed})
 check("conversation pure : toujours aucun outil", with_recent_tools([], session, TOOLS_DEFINITIONS) == [])
 
+# 11. Musique (26/10/2026 : YouTube Music indisponible, "stoppe à moi" non compris)
+from tools.instant import music_command
+from tools.youtube_tool import pick_video
+commands = {"pause": ("pause", True), "mets la musique en pause": ("pause", True),
+            "stop la musique": ("pause", True), "stoppe à moi": ("pause", False),
+            "chanson suivante s'il te plaît": ("next", True), "passe à la suivante": ("next", True),
+            "reprends la musique Amah": ("play", True), "chanson précédente": ("previous", True)}
+check("musique : pause, suivante, reprise, précédente reconnues sans IA",
+      all(music_command(t) == e for t, e in commands.items()))
+check("musique : « mets la musique de Santo », « coupe le son », « arrête le PC » non détournés",
+      not any(music_command(t) for t in ("mets la musique de Santo", "mets la musique", "coupe le son",
+                                          "arrête le PC", "fais une pause dans mon planning", "relance le programme")))
+results_page = [("a1", "Télé-réalité : Saad fait irruption à Sanoyah"), ("b2", "Santo Don kangni"),
+                ("c3", "Santo don KANGNI une valeur sûre")]
+check("musique : la vidéo dont le titre contient l'artiste, pas le 1er résultat",
+      pick_video("Santo Donkangni", results_page)[0] == "b2"
+      and pick_video("lance la musique de Santo Donkangni", results_page)[0] == "b2"
+      and pick_video("zouk", results_page)[0] == "a1")
+check("transcription : « Saint-Auban Cagnes » -> Santo Donkangni",
+      fix_transcript("lance la musique de Saint-Auban Cagnes") == "lance la musique de Santo Donkangni")
+
 print(f"\n{sum(results)}/{len(results)} vérifications réussies")
 sys.exit(0 if all(results) else 1)

@@ -210,7 +210,8 @@ TOOLS_DEFINITIONS = [
     # Execution automatique de plan (v1.5)
     _f("execute_plan",    "Genere ET execute automatiquement un plan multi-etapes (avec retry sur echec). S'arrete et demande confirmation avant une action sensible (suppression, email, etc.) -- rappeler alors avec plan_id et confirmed=true", {"goal": _s("objectif detaille (omettre si on reprend un plan)"), "plan_id": _s("id du plan en attente de confirmation"), "confirmed": _b("true pour confirmer et executer l'etape sensible en attente")}, []),
     # YouTube musique
-    _f("play_music",      "Lance une recherche musicale sur YouTube Music dans le navigateur", {"query": _s("titre artiste ou genre musical")}, ["query"]),
+    _f("play_music",      "Joue sur YouTube la video qui correspond (titre, artiste, genre), dans le navigateur", {"query": _s("titre artiste ou genre musical")}, ["query"]),
+    _f("control_music",   "Musique ou video en cours (YouTube, Spotify...) : pause, reprise, morceau suivant ou precedent", {"action": {"type": "string", "enum": ["pause", "play", "next", "previous"], "description": "pause, play (reprendre), next (suivant), previous (precedent)"}}, ["action"]),
     # Outils code (v1.5)
     _f("write_code",      "Ecrit du code dans un fichier (py, js, html, css, etc.)",    {"filename": _s("chemin du fichier"), "code": _s("code complet"), "language": _s("langage ex: python")}, ["filename","code"]),
     _f("run_code",        "Execute un fichier Python (.py) ou JavaScript (.js) et retourne la sortie", {"path": _s("chemin du fichier a executer")}, ["path"]),

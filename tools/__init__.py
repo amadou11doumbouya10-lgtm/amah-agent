@@ -43,7 +43,7 @@ _TOOL_MODULES = [
         "set_brightness", "get_brightness", "wifi_toggle",
     ]),
     ("tools.screen_vision", ["analyze_screen"]),
-    ("tools.youtube_tool", ["open_youtube", "search_youtube", "play_music"]),
+    ("tools.youtube_tool", ["open_youtube", "search_youtube", "play_music", "control_music"]),
     ("tools.code_tools", ["write_code", "run_code", "explain_code"]),
     ("tools.flight_finder", ["search_flights"]),
     ("tools.planner", ["create_plan", "execute_plan"]),

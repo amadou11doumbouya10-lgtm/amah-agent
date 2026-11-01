@@ -198,6 +198,8 @@ TRANSCRIPT_FIXES = [
     (re.compile(r"\bdiptop\b|\blient? dit op\b", re.I), "GitHub"),
     # "champ de texte" (le champ de saisie de l'interface vocale)
     (re.compile(r"\b(?:cha[iî]ne|chain|chant|chat|champs?)\s+de\s+(?:test|teste|texte|tests)\b", re.I), "champ de texte"),
+    # L'artiste Santo Donkangni (26/10/2026 : Amah lançait "Saint-Auban Cagnes")
+    (re.compile(r"\bsaint[\s-]+auban[\s-]+cagnes?\b", re.I), "Santo Donkangni"),
     # Champs d'un formulaire dictés : "chambre de contact", "un chat mail"
     (re.compile(r"\bchambre\s+de\s+(contact|saisie|texte|recherche|t[ée]l[ée]phone|nom)\b", re.I), r"champ de \1"),
     (re.compile(r"\b(?:chat|chant)\s+(e-?mail|mail)\b", re.I), r"champ \1"),
